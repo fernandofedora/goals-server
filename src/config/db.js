@@ -9,7 +9,7 @@ export const sequelize = new Sequelize(
   process.env.MYSQLPASSWORD || process.env.DB_PASSWORD,
   {
     host: process.env.MYSQLHOST || process.env.DB_HOST,
-    port: process.env.MYSQLPORT || 31465,
+    port: process.env.MYSQLPORT || 31465 || 3306,
     dialect: 'mysql',
     logging: false
   }
