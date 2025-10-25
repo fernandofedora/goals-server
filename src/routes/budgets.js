@@ -16,6 +16,14 @@ router.post('/', async (req, res) => {
   res.json(item);
 });
 
+router.put('/:id', async (req, res) => {
+  const item = await Budget.findOne({ where: { id: req.params.id, UserId: req.userId } });
+  if (!item) return res.status(404).json({ message: 'Not found' });
+  const { month, year, amount } = req.body;
+  await item.update({ month, year, amount });
+  res.json(item);
+});
+
 router.delete('/:id', async (req, res) => {
   const item = await Budget.findOne({ where: { id: req.params.id, UserId: req.userId } });
   if (!item) return res.status(404).json({ message: 'Not found' });
