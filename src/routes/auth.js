@@ -28,4 +28,27 @@ router.post('/login', async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
 
+// Start password reset: verify email exists
+router.post('/reset-start', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email required' });
+    const user = await User.findOne({ where: { email } });
+    res.json({ exists: !!user });
+  } catch (e) { res.status(500).json({ message: 'Server error' }); }
+});
+
+// Complete password reset: update password for given email
+router.post('/reset', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ message: 'Email and password required' });
+    const user = await User.findOne({ where: { email } });
+    if (!user) return res.status(404).json({ message: 'Email not found' });
+    const passwordHash = await bcrypt.hash(password, 10);
+    await user.update({ passwordHash });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ message: 'Server error' }); }
+});
+
 export default router;
