@@ -38,6 +38,21 @@ export const Budget = sequelize.define('Budget', {
   amount: { type: DataTypes.DECIMAL(10,2), allowNull: false }
 });
 
+export const SavingsPlan = sequelize.define('SavingsPlan', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING, allowNull: false },
+  targetAmount: { type: DataTypes.DECIMAL(10,2), allowNull: false },
+  status: { type: DataTypes.ENUM('active','archived'), allowNull: false, defaultValue: 'active' },
+  linkedCategoryId: { type: DataTypes.INTEGER, allowNull: true }
+});
+
+export const SavingsContribution = sequelize.define('SavingsContribution', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  amount: { type: DataTypes.DECIMAL(10,2), allowNull: false },
+  date: { type: DataTypes.DATEONLY, allowNull: false },
+  note: { type: DataTypes.STRING, allowNull: true }
+});
+
 // Associations
 User.hasMany(Category); Category.belongsTo(User);
 User.hasMany(Card); Card.belongsTo(User);
@@ -45,3 +60,9 @@ User.hasMany(Transaction); Transaction.belongsTo(User);
 Category.hasMany(Transaction); Transaction.belongsTo(Category);
 Card.hasMany(Transaction); Transaction.belongsTo(Card);
 User.hasMany(Budget); Budget.belongsTo(User);
+
+User.hasMany(SavingsPlan); SavingsPlan.belongsTo(User);
+SavingsPlan.belongsTo(Category, { as: 'linkedCategory', foreignKey: 'linkedCategoryId' });
+SavingsPlan.hasMany(SavingsContribution, { foreignKey: 'planId' });
+SavingsContribution.belongsTo(SavingsPlan, { foreignKey: 'planId' });
+User.hasMany(SavingsContribution); SavingsContribution.belongsTo(User);

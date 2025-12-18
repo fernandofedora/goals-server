@@ -8,6 +8,7 @@ import cardRoutes from './routes/cards.js';
 import transactionRoutes from './routes/transactions.js';
 import budgetRoutes from './routes/budgets.js';
 import statsRoutes from './routes/stats.js';
+import savingsRoutes from './routes/savings.js';
 
 dotenv.config();
 const app = express();
@@ -21,6 +22,7 @@ app.use('/api/cards', cardRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/budgets', budgetRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/savings', savingsRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
