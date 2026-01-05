@@ -6,14 +6,16 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
-  const items = await Card.findAll({ where: { UserId: req.userId } });
+  const items = await Card.findAll({ where: { UserId: req.userId }, attributes: { exclude: ['UserId'] } });
   res.json(items);
 });
 
 router.post('/', async (req, res) => {
   const { name, color, last4 } = req.body;
   const item = await Card.create({ name, color, last4, UserId: req.userId });
-  res.json(item);
+  const plain = item.toJSON();
+  delete plain.UserId;
+  res.json(plain);
 });
 
 router.put('/:id', async (req, res) => {
@@ -21,7 +23,9 @@ router.put('/:id', async (req, res) => {
   if (!item) return res.status(404).json({ message: 'Not found' });
   const { name, color, last4 } = req.body;
   await item.update({ name, color, last4 });
-  res.json(item);
+  const plain = item.toJSON();
+  delete plain.UserId;
+  res.json(plain);
 });
 
 router.delete('/:id', async (req, res) => {
