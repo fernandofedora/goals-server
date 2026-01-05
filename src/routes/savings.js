@@ -10,7 +10,8 @@ router.use(authMiddleware);
 router.get('/plans', async (req, res) => {
   const plans = await SavingsPlan.findAll({
     where: { UserId: req.userId },
-    include: [{ model: Category, as: 'linkedCategory' }],
+    attributes: { exclude: ['UserId'] },
+    include: [{ model: Category, as: 'linkedCategory', attributes: { exclude: ['UserId'] } }],
     order: [['updatedAt', 'DESC']]
   });
   res.json(plans);
@@ -28,7 +29,7 @@ router.post('/plans', async (req, res) => {
     if (!cat) return res.status(403).json({ message: 'Categoría no permitida' });
   }
   const plan = await SavingsPlan.create({ name, targetAmount, UserId: req.userId, linkedCategoryId: categoryId });
-  const full = await SavingsPlan.findByPk(plan.id, { include: [{ model: Category, as: 'linkedCategory' }] });
+  const full = await SavingsPlan.findByPk(plan.id, { attributes: { exclude: ['UserId'] }, include: [{ model: Category, as: 'linkedCategory', attributes: { exclude: ['UserId'] } }] });
   res.json(full);
 });
 
@@ -49,7 +50,7 @@ router.put('/plans/:id', async (req, res) => {
 
 // Detalle de plan
 router.get('/plans/:id', async (req, res) => {
-  const plan = await SavingsPlan.findOne({ where: { id: req.params.id, UserId: req.userId }, include: [{ model: Category, as: 'linkedCategory' }] });
+  const plan = await SavingsPlan.findOne({ where: { id: req.params.id, UserId: req.userId }, attributes: { exclude: ['UserId'] }, include: [{ model: Category, as: 'linkedCategory', attributes: { exclude: ['UserId'] } }] });
   if (!plan) return res.status(404).json({ message: 'Plan no encontrado' });
   res.json(plan);
 });
@@ -71,16 +72,20 @@ router.post('/contributions', async (req, res) => {
   const plan = await SavingsPlan.findOne({ where: { id: planId, UserId: req.userId } });
   if (!plan) return res.status(403).json({ message: 'Plan no permitido' });
   const contr = await SavingsContribution.create({ planId, amount, date, note: note || null, UserId: req.userId });
-  res.json(contr);
+  const plain = contr.toJSON();
+  delete plain.UserId;
+  res.json(plain);
 });
 
 // Actualizar contribución manual
 router.put('/contributions/:id', async (req, res) => {
-  const contr = await SavingsContribution.findOne({ where: { id: req.params.id, UserId: req.userId }, include: [SavingsPlan] });
+  const contr = await SavingsContribution.findOne({ where: { id: req.params.id, UserId: req.userId }, include: [{ model: SavingsPlan, attributes: { exclude: ['UserId'] } }] });
   if (!contr) return res.status(404).json({ message: 'Contribución no encontrada' });
   const { amount, date, note } = req.body;
   await contr.update({ amount, date, note: note ?? contr.note });
-  res.json(contr);
+  const plainUpd = contr.toJSON();
+  delete plainUpd.UserId;
+  res.json(plainUpd);
 });
 
 // Eliminar contribución manual

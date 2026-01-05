@@ -6,14 +6,28 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
-  const items = await Transaction.findAll({ where: { UserId: req.userId }, include: [Category, Card], order: [['date','DESC']] });
+  const items = await Transaction.findAll({
+    where: { UserId: req.userId },
+    attributes: { exclude: ['UserId'] },
+    include: [
+      { model: Category, attributes: { exclude: ['UserId'] } },
+      { model: Card, attributes: { exclude: ['UserId'] } }
+    ],
+    order: [['date','DESC']]
+  });
   res.json(items);
 });
 
 router.post('/', async (req, res) => {
   const { type, description, categoryId, amount, date, paymentMethod, cardId } = req.body;
   const item = await Transaction.create({ type, description, amount, date, paymentMethod, UserId: req.userId, CategoryId: categoryId || null, CardId: cardId || null });
-  const full = await Transaction.findByPk(item.id, { include: [Category, Card] });
+  const full = await Transaction.findByPk(item.id, {
+    attributes: { exclude: ['UserId'] },
+    include: [
+      { model: Category, attributes: { exclude: ['UserId'] } },
+      { model: Card, attributes: { exclude: ['UserId'] } }
+    ]
+  });
   res.json(full);
 });
 
@@ -22,7 +36,13 @@ router.put('/:id', async (req, res) => {
   if (!item) return res.status(404).json({ message: 'Not found' });
   const { type, description, categoryId, amount, date, paymentMethod, cardId } = req.body;
   await item.update({ type, description, amount, date, paymentMethod, CategoryId: categoryId || null, CardId: cardId || null });
-  const full = await Transaction.findByPk(item.id, { include: [Category, Card] });
+  const full = await Transaction.findByPk(item.id, {
+    attributes: { exclude: ['UserId'] },
+    include: [
+      { model: Category, attributes: { exclude: ['UserId'] } },
+      { model: Card, attributes: { exclude: ['UserId'] } }
+    ]
+  });
   res.json(full);
 });
 

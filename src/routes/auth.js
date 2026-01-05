@@ -12,7 +12,7 @@ router.post('/register', async (req, res) => {
     if (existing) return res.status(400).json({ message: 'Email already registered' });
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, passwordHash });
-    res.json({ id: user.id, name: user.name, email: user.email });
+    res.json({ publicId: user.publicId, name: user.name, email: user.email });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -24,7 +24,7 @@ router.post('/login', async (req, res) => {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
     const token = jwt.sign({ id: user.id }, process.env.SECRET_KEY, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+    res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email } });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
 
