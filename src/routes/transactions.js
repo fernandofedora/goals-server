@@ -6,15 +6,36 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
-  const items = await Transaction.findAll({
-    where: { UserId: req.userId },
+  const { cardId, page, limit } = req.query;
+  const where = { UserId: req.userId };
+  if (cardId) where.CardId = cardId;
+
+  const commonOptions = {
+    where,
     attributes: { exclude: ['UserId'] },
     include: [
       { model: Category, attributes: { exclude: ['UserId'] } },
       { model: Card, attributes: { exclude: ['UserId'] } }
     ],
     order: [['date','DESC']]
-  });
+  };
+
+  const hasPagination = page !== undefined || limit !== undefined;
+
+  if (hasPagination) {
+    const pageInt = Math.max(parseInt(page || '1', 10), 1);
+    const limitInt = Math.max(parseInt(limit || '20', 10), 1);
+    const offset = (pageInt - 1) * limitInt;
+    const { rows, count } = await Transaction.findAndCountAll({
+      ...commonOptions,
+      offset,
+      limit: limitInt
+    });
+    res.json({ items: rows, page: pageInt, limit: limitInt, total: count });
+    return;
+  }
+
+  const items = await Transaction.findAll(commonOptions);
   res.json(items);
 });
 
