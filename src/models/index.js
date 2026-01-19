@@ -6,7 +6,8 @@ export const User = sequelize.define('User', {
   publicId: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, allowNull: false, unique: true },
   name: { type: DataTypes.STRING, allowNull: false },
   email: { type: DataTypes.STRING, allowNull: false, unique: true },
-  passwordHash: { type: DataTypes.STRING, allowNull: false }
+  passwordHash: { type: DataTypes.STRING, allowNull: false },
+  lastLoginAt: { type: DataTypes.DATE, allowNull: true }
 });
 
 export const Category = sequelize.define('Category', {

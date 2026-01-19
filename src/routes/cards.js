@@ -1,6 +1,6 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { Card } from '../models/index.js';
+import { Card, Transaction } from '../models/index.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -31,6 +31,7 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const item = await Card.findOne({ where: { id: req.params.id, UserId: req.userId } });
   if (!item) return res.status(404).json({ message: 'Not found' });
+  await Transaction.destroy({ where: { UserId: req.userId, CardId: item.id } });
   await item.destroy();
   res.json({ success: true });
 });
