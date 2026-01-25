@@ -28,6 +28,7 @@ export const connectDB = async () => {
     if (!desc.lastLoginAt) {
       await qi.addColumn('Users', 'lastLoginAt', { type: DataTypes.DATE, allowNull: true });
     }
+    const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query('SELECT id FROM `Users` WHERE `publicId` IS NULL');
     for (const r of rows) {
       await sequelize.query('UPDATE `Users` SET `publicId` = :uuid WHERE `id` = :id', { replacements: { uuid: uuidv4(), id: r.id } });
