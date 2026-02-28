@@ -9,6 +9,7 @@ import transactionRoutes from './routes/transactions.js';
 import budgetRoutes from './routes/budgets.js';
 import statsRoutes from './routes/stats.js';
 import savingsRoutes from './routes/savings.js';
+import accountsRoutes from './routes/accounts.js';
 import userRoutes from './routes/user.js';
 
 dotenv.config();
@@ -24,6 +25,7 @@ app.use('/api/transactions', transactionRoutes);
 app.use('/api/budgets', budgetRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/savings', savingsRoutes);
+app.use('/api/accounts', accountsRoutes);
 app.use('/api/user', userRoutes);
 
 const PORT = process.env.PORT || 4000;

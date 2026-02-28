@@ -68,3 +68,12 @@ SavingsPlan.belongsTo(Category, { as: 'linkedCategory', foreignKey: 'linkedCateg
 SavingsPlan.hasMany(SavingsContribution, { foreignKey: 'planId' });
 SavingsContribution.belongsTo(SavingsPlan, { foreignKey: 'planId' });
 User.hasMany(SavingsContribution); SavingsContribution.belongsTo(User);
+
+export const Account = sequelize.define('Account', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING, allowNull: false },
+  color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#a3e635' },
+  initialBalance: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+});
+
+User.hasMany(Account); Account.belongsTo(User);
