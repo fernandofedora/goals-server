@@ -1,6 +1,6 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { Transaction, Category, Card, Budget } from '../models/index.js';
+import { Transaction, Category, Card, Budget, Account } from '../models/index.js';
 import ExcelJS from 'exceljs';
 import { Op } from 'sequelize'
 
@@ -31,7 +31,7 @@ router.get('/summary', async (req, res) => {
       where.date = { [Op.between]: [start, end] };
     }
 
-    const txs = await Transaction.findAll({ where, include: [Category, Card] });
+    const txs = await Transaction.findAll({ where, include: [Category, Card, Account] });
 
     // Totals
     const income = txs.filter(t=>t.type==='income').reduce((a,b)=>a+Number(b.amount),0);
@@ -74,8 +74,16 @@ router.get('/summary', async (req, res) => {
     // Budget amount for the selected month
     const budget = (month && year) ? await Budget.findOne({ where: { UserId: req.userId, month, year } }) : null;
 
-    res.json({ totals, categories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null });
+    // Income methods breakdown
+    const incomeMethods = {
+      cash: txs.filter(t => t.type === 'income' && !t.AccountId).reduce((a, b) => a + Number(b.amount), 0),
+      account: txs.filter(t => t.type === 'income' && t.AccountId).reduce((a, b) => a + Number(b.amount), 0),
+    };
+
+
+    res.json({ totals, categories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
   } catch (e) {
+        console.error(e);
     res.status(500).json({ message: 'Server error' });
   }
 });

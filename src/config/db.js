@@ -21,6 +21,11 @@ export const connectDB = async () => {
     await sequelize.authenticate();
     await sequelize.sync();
     const qi = sequelize.getQueryInterface();
+
+    const descTrans = await qi.describeTable('Transactions').catch(() => ({}));
+    if (!descTrans.AccountId) {
+      await qi.addColumn('Transactions', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
+    }
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {
       await qi.addColumn('Users', 'publicId', { type: DataTypes.UUID, allowNull: true, unique: true });
