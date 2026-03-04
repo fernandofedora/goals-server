@@ -11,6 +11,8 @@ import statsRoutes from './routes/stats.js';
 import savingsRoutes from './routes/savings.js';
 import accountsRoutes from './routes/accounts.js';
 import userRoutes from './routes/user.js';
+import scheduledPaymentsRoutes from './routes/scheduledPayments.js';
+import './cron.js';
 
 dotenv.config();
 const app = express();
@@ -27,6 +29,7 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/savings', savingsRoutes);
 app.use('/api/accounts', accountsRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/scheduled-payments', scheduledPaymentsRoutes);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

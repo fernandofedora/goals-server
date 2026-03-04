@@ -56,6 +56,28 @@ export const SavingsContribution = sequelize.define('SavingsContribution', {
   note: { type: DataTypes.STRING, allowNull: true }
 });
 
+export const Account = sequelize.define('Account', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING, allowNull: false },
+  color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#a3e635' },
+  initialBalance: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+});
+
+export const ScheduledPayment = sequelize.define('ScheduledPayment', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING, allowNull: false },
+  type: { type: DataTypes.ENUM('income', 'expense'), allowNull: false },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  period: { type: DataTypes.ENUM('daily', 'weekly', 'bi-weekly', 'monthly', 'quarterly', 'yearly'), allowNull: false },
+  description: { type: DataTypes.STRING },
+  startDate: { type: DataTypes.DATEONLY, allowNull: false },
+  endDate: { type: DataTypes.DATEONLY },
+  occurrences: { type: DataTypes.INTEGER },
+  specificDay: { type: DataTypes.INTEGER },
+  status: { type: DataTypes.ENUM('active', 'paused'), defaultValue: 'active' },
+  nextDueDate: { type: DataTypes.DATEONLY, allowNull: false },
+});
+
 // Associations
 User.hasMany(Category); Category.belongsTo(User);
 User.hasMany(Card); Card.belongsTo(User);
@@ -70,12 +92,9 @@ SavingsPlan.hasMany(SavingsContribution, { foreignKey: 'planId' });
 SavingsContribution.belongsTo(SavingsPlan, { foreignKey: 'planId' });
 User.hasMany(SavingsContribution); SavingsContribution.belongsTo(User);
 
-export const Account = sequelize.define('Account', {
-  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-  name: { type: DataTypes.STRING, allowNull: false },
-  color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#a3e635' },
-  initialBalance: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
-});
-
 User.hasMany(Account); Account.belongsTo(User);
 Account.hasMany(Transaction); Transaction.belongsTo(Account);
+
+User.hasMany(ScheduledPayment); ScheduledPayment.belongsTo(User);
+ScheduledPayment.belongsTo(Category); Category.hasMany(ScheduledPayment);
+ScheduledPayment.belongsTo(Card); Card.hasMany(ScheduledPayment);
