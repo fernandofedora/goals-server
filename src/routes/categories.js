@@ -9,16 +9,28 @@ router.get('/', async (req, res) => {
   let items = await Category.findAll({ where: { UserId: req.userId }, attributes: { exclude: ['UserId'] } });
 
   if (items.length === 0) {
-    const defaults = [
-      { name: 'Housing', color: '#8b5cf6', type: 'expense', UserId: req.userId },
-      { name: 'Food', color: '#f59e0b', type: 'expense', UserId: req.userId },
-      { name: 'Transportation', color: '#3b82f6', type: 'expense', UserId: req.userId },
-      { name: 'Utilities', color: '#06b6d4', type: 'expense', UserId: req.userId },
-      { name: 'Entertainment', color: '#ec4899', type: 'expense', UserId: req.userId },
-      { name: 'Healthcare', color: '#10b981', type: 'expense', UserId: req.userId },
-      { name: 'Salary', color: '#10b981', type: 'income', UserId: req.userId }
-    ];
-    await Category.bulkCreate(defaults);
+    try {
+      const defaults = [
+        { name: 'Housing', color: '#8b5cf6', type: 'expense' },
+        { name: 'Food', color: '#f59e0b', type: 'expense' },
+        { name: 'Transportation', color: '#3b82f6', type: 'expense' },
+        { name: 'Utilities', color: '#06b6d4', type: 'expense' },
+        { name: 'Entertainment', color: '#ec4899', type: 'expense' },
+        { name: 'Healthcare', color: '#10b981', type: 'expense' },
+        { name: 'Salary', color: '#10b981', type: 'income' }
+      ];
+
+      await Promise.all(
+        defaults.map(def =>
+          Category.findOrCreate({
+            where: { name: def.name, type: def.type, UserId: req.userId },
+            defaults: { color: def.color, UserId: req.userId }
+          })
+        )
+      );
+    } catch (error) {
+      console.error('Failed to create default categories:', error);
+    }
     items = await Category.findAll({ where: { UserId: req.userId }, attributes: { exclude: ['UserId'] } });
   }
 
