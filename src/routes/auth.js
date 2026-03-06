@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { User } from '../models/index.js';
+import { User, Category } from '../models/index.js';
 
 const router = express.Router();
 
@@ -12,6 +12,21 @@ router.post('/register', async (req, res) => {
     if (existing) return res.status(400).json({ message: 'Email already registered' });
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, passwordHash });
+
+    try {
+      const defaults = [
+        { name: 'Housing', color: '#8b5cf6', type: 'expense', UserId: user.id },
+        { name: 'Food', color: '#f59e0b', type: 'expense', UserId: user.id },
+        { name: 'Transportation', color: '#3b82f6', type: 'expense', UserId: user.id },
+        { name: 'Utilities', color: '#06b6d4', type: 'expense', UserId: user.id },
+        { name: 'Entertainment', color: '#ec4899', type: 'expense', UserId: user.id },
+        { name: 'Healthcare', color: '#10b981', type: 'expense', UserId: user.id },
+        { name: 'Salary', color: '#10b981', type: 'income', UserId: user.id }
+      ];
+      await Category.bulkCreate(defaults);
+    } catch (err) {
+      console.error('Failed to create default categories for new user:', err);
+    }
     res.json({ publicId: user.publicId, name: user.name, email: user.email });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
