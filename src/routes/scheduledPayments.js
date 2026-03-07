@@ -1,6 +1,6 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { ScheduledPayment, Category, Card } from '../models/index.js';
+import { ScheduledPayment, Category, Card, Account } from '../models/index.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -9,11 +9,11 @@ router.use(authMiddleware);
 // @desc    Create a scheduled payment
 // @access  Private
 router.post('/', async (req, res) => {
-  const { name, type, amount, period, CardId, CategoryId, description, startDate, endDate, occurrences, specificDay } = req.body;
+  const { name, type, amount, period, CardId, AccountId, paymentMethod, CategoryId, description, startDate, endDate, occurrences, specificDay } = req.body;
 
   try {
     // Simple validation
-    if (!name || !type || !amount || !period || !CategoryId || !startDate) {
+    if (!name || !type || !amount || !period || !CategoryId || !startDate || !paymentMethod) {
       return res.status(400).json({ msg: 'Please enter all required fields' });
     }
 
@@ -23,7 +23,9 @@ router.post('/', async (req, res) => {
       type,
       amount,
       period,
-      CardId,
+      CardId: paymentMethod === 'card' ? CardId : null,
+      AccountId: paymentMethod === 'account' ? AccountId : null,
+      paymentMethod,
       CategoryId,
       description,
       startDate,
@@ -47,7 +49,7 @@ router.get('/', async (req, res) => {
   try {
     const scheduledPayments = await ScheduledPayment.findAll({
       where: { UserId: req.userId },
-      include: [Category, Card]
+      include: [Category, Card, Account]
     });
     res.json(scheduledPayments);
   } catch (err) {
@@ -60,7 +62,7 @@ router.get('/', async (req, res) => {
 // @desc    Update a scheduled payment
 // @access  Private
 router.put('/:id', async (req, res) => {
-  const { name, type, amount, period, CardId, CategoryId, description, startDate, endDate, occurrences, specificDay, status } = req.body;
+  const { name, type, amount, period, CardId, AccountId, paymentMethod, CategoryId, description, startDate, endDate, occurrences, specificDay, status } = req.body;
 
   try {
     let scheduledPayment = await ScheduledPayment.findByPk(req.params.id);
@@ -89,7 +91,9 @@ router.put('/:id', async (req, res) => {
       type,
       amount,
       period,
-      CardId,
+      CardId: paymentMethod === 'card' ? CardId : null,
+      AccountId: paymentMethod === 'account' ? AccountId : null,
+      paymentMethod,
       CategoryId,
       description,
       startDate,

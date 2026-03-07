@@ -14,7 +14,7 @@ export const Category = sequelize.define('Category', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
   color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#3b82f6' },
-  type: { type: DataTypes.ENUM('expense','income'), allowNull: false }
+  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false }
 });
 
 export const Card = sequelize.define('Card', {
@@ -26,32 +26,32 @@ export const Card = sequelize.define('Card', {
 
 export const Transaction = sequelize.define('Transaction', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-  type: { type: DataTypes.ENUM('expense','income'), allowNull: false },
+  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false },
   description: { type: DataTypes.STRING, allowNull: false },
-  amount: { type: DataTypes.DECIMAL(10,2), allowNull: false },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   date: { type: DataTypes.DATEONLY, allowNull: false },
-  paymentMethod: { type: DataTypes.ENUM('cash','card'), allowNull: false },
-    AccountId: { type: DataTypes.INTEGER, allowNull: true }
+  paymentMethod: { type: DataTypes.ENUM('cash', 'card'), allowNull: false },
+  AccountId: { type: DataTypes.INTEGER, allowNull: true }
 });
 
 export const Budget = sequelize.define('Budget', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   month: { type: DataTypes.INTEGER, allowNull: false },
   year: { type: DataTypes.INTEGER, allowNull: false },
-  amount: { type: DataTypes.DECIMAL(10,2), allowNull: false }
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false }
 });
 
 export const SavingsPlan = sequelize.define('SavingsPlan', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
-  targetAmount: { type: DataTypes.DECIMAL(10,2), allowNull: false },
-  status: { type: DataTypes.ENUM('active','archived'), allowNull: false, defaultValue: 'active' },
+  targetAmount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  status: { type: DataTypes.ENUM('active', 'archived'), allowNull: false, defaultValue: 'active' },
   linkedCategoryId: { type: DataTypes.INTEGER, allowNull: true }
 });
 
 export const SavingsContribution = sequelize.define('SavingsContribution', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-  amount: { type: DataTypes.DECIMAL(10,2), allowNull: false },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   date: { type: DataTypes.DATEONLY, allowNull: false },
   note: { type: DataTypes.STRING, allowNull: true }
 });
@@ -76,6 +76,8 @@ export const ScheduledPayment = sequelize.define('ScheduledPayment', {
   specificDay: { type: DataTypes.INTEGER },
   status: { type: DataTypes.ENUM('active', 'paused'), defaultValue: 'active' },
   nextDueDate: { type: DataTypes.DATEONLY, allowNull: false },
+  paymentMethod: { type: DataTypes.ENUM('card', 'cash', 'account'), allowNull: true },
+  AccountId: { type: DataTypes.INTEGER, allowNull: true },
 });
 
 // Associations
@@ -98,3 +100,4 @@ Account.hasMany(Transaction); Transaction.belongsTo(Account);
 User.hasMany(ScheduledPayment); ScheduledPayment.belongsTo(User);
 ScheduledPayment.belongsTo(Category); Category.hasMany(ScheduledPayment);
 ScheduledPayment.belongsTo(Card); Card.hasMany(ScheduledPayment);
+ScheduledPayment.belongsTo(Account); Account.hasMany(ScheduledPayment);
