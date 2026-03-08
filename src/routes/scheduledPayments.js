@@ -13,7 +13,7 @@ router.post('/', async (req, res) => {
 
   try {
     // Simple validation
-    if (!name || !type || !amount || !period || !CategoryId || !startDate || !paymentMethod) {
+    if (!name || !type || !amount || !period || !CategoryId || !startDate || !paymentMethod || !endDate) {
       return res.status(400).json({ msg: 'Please enter all required fields' });
     }
 

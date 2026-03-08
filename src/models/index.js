@@ -71,7 +71,7 @@ export const ScheduledPayment = sequelize.define('ScheduledPayment', {
   period: { type: DataTypes.ENUM('daily', 'weekly', 'bi-weekly', 'monthly', 'quarterly', 'yearly'), allowNull: false },
   description: { type: DataTypes.STRING },
   startDate: { type: DataTypes.DATEONLY, allowNull: false },
-  endDate: { type: DataTypes.DATEONLY },
+  endDate: { type: DataTypes.DATEONLY, allowNull: false },
   occurrences: { type: DataTypes.INTEGER },
   specificDay: { type: DataTypes.INTEGER },
   status: { type: DataTypes.ENUM('active', 'paused'), defaultValue: 'active' },
