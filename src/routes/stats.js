@@ -12,7 +12,7 @@ const periodFilter = (month, year) => {
   if (!month || !year) return {};
   const start = new Date(year, month - 1, 1);
   const end = new Date(year, month, 0);
-  return { date: { $between: [start.toISOString().slice(0,10), end.toISOString().slice(0,10)] } };
+  return { date: { $between: [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)] } };
 };
 
 router.get('/summary', async (req, res) => {
@@ -26,21 +26,21 @@ router.get('/summary', async (req, res) => {
       const parts = String(period).split('-');
       year = Number(parts[0]); month = Number(parts[1]);
       if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
-      const start = `${year}-${String(month).padStart(2,'0')}-01`;
-      const end = `${year}-${String(month).padStart(2,'0')}-${String(new Date(year, month, 0).getDate()).padStart(2,'0')}`;
+      const start = `${year}-${String(month).padStart(2, '0')}-01`;
+      const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
       where.date = { [Op.between]: [start, end] };
     }
 
     const txs = await Transaction.findAll({ where, include: [Category, Card, Account] });
 
     // Totals
-    const income = txs.filter(t=>t.type==='income').reduce((a,b)=>a+Number(b.amount),0);
-    const expense = txs.filter(t=>t.type==='expense').reduce((a,b)=>a+Number(b.amount),0);
+    const income = txs.filter(t => t.type === 'income').reduce((a, b) => a + Number(b.amount), 0);
+    const expense = txs.filter(t => t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0);
     const totals = { income, expense, transactions: txs.length, balance: income - expense };
 
     // Categories (expenses only)
     const categoryMap = {};
-    txs.filter(t=>t.type==='expense').forEach(t=>{
+    txs.filter(t => t.type === 'expense').forEach(t => {
       const name = t.Category?.name || 'Uncategorized';
       const color = t.Category?.color || '#3b82f6';
       if (!categoryMap[name]) categoryMap[name] = { name, amount: 0, color };
@@ -50,25 +50,26 @@ router.get('/summary', async (req, res) => {
 
     // Income vs Expense timeseries (by day)
     const dayMap = {};
-    txs.forEach(t=>{
+    txs.forEach(t => {
       const d = t.date; // DATEONLY string 'YYYY-MM-DD'
       if (!dayMap[d]) dayMap[d] = { date: d, income: 0, expense: 0 };
       if (t.type === 'income') dayMap[d].income += Number(t.amount);
       else if (t.type === 'expense') dayMap[d].expense += Number(t.amount);
     });
-    const incomeVsExpense = Object.values(dayMap).sort((a,b)=> a.date.localeCompare(b.date));
+    const incomeVsExpense = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date));
 
     // Payment methods breakdown (expenses only)
     const paymentMethods = {
-      cash: txs.filter(t=>t.paymentMethod==='cash' && t.type==='expense').reduce((a,b)=>a+Number(b.amount),0),
-      card: txs.filter(t=>t.paymentMethod==='card' && t.type==='expense').reduce((a,b)=>a+Number(b.amount),0)
+      cash: txs.filter(t => t.paymentMethod === 'cash' && !t.AccountId && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
+      card: txs.filter(t => t.paymentMethod === 'card' && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
+      account: txs.filter(t => t.AccountId && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0)
     };
 
     // Per card breakdown (expenses only)
     const perCard = {};
-    txs.filter(t=>t.paymentMethod==='card' && t.type==='expense').forEach(t=>{
+    txs.filter(t => t.paymentMethod === 'card' && t.type === 'expense').forEach(t => {
       const name = t.Card?.name || 'Unknown';
-      perCard[name] = (perCard[name]||0)+Number(t.amount);
+      perCard[name] = (perCard[name] || 0) + Number(t.amount);
     });
 
     // Budget amount for the selected month
@@ -83,7 +84,7 @@ router.get('/summary', async (req, res) => {
 
     res.json({ totals, categories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
   } catch (e) {
-        console.error(e);
+    console.error(e);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -97,8 +98,8 @@ router.get('/export', async (req, res) => {
       const parts = String(period).split('-');
       selYear = Number(parts[0]); selMonth = Number(parts[1]);
       if (!selYear || !selMonth) return res.status(400).json({ message: 'Invalid period' });
-      const start = `${selYear}-${String(selMonth).padStart(2,'0')}-01`;
-      const end = `${selYear}-${String(selMonth).padStart(2,'0')}-${String(new Date(selYear, selMonth, 0).getDate()).padStart(2,'0')}`;
+      const start = `${selYear}-${String(selMonth).padStart(2, '0')}-01`;
+      const end = `${selYear}-${String(selMonth).padStart(2, '0')}-${String(new Date(selYear, selMonth, 0).getDate()).padStart(2, '0')}`;
       where.date = { [Op.between]: [start, end] };
     }
 
@@ -106,19 +107,19 @@ router.get('/export', async (req, res) => {
     const txs = await Transaction.findAll({ where, include: [Category, Card] });
 
     // Transactions sheet
-    const transactionRows = txs.map(t=>({
+    const transactionRows = txs.map(t => ({
       Type: t.type,
       Description: t.description,
       Category: t.Category?.name || '',
       Amount: Number(t.amount),
       Date: t.date,
-      PaymentMethod: t.paymentMethod,
+      PaymentMethod: (t.type === 'expense' && t.AccountId) ? 'account' : t.paymentMethod,
       Card: t.Card?.name || ''
     }));
 
     // Overview metrics
-    const income = txs.filter(t=>t.type==='income').reduce((a,b)=>a+Number(b.amount),0);
-    const expense = txs.filter(t=>t.type==='expense').reduce((a,b)=>a+Number(b.amount),0);
+    const income = txs.filter(t => t.type === 'income').reduce((a, b) => a + Number(b.amount), 0);
+    const expense = txs.filter(t => t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0);
     const overviewRows = [
       { Metric: 'Income', Value: income },
       { Metric: 'Expense', Value: expense },
@@ -129,17 +130,17 @@ router.get('/export', async (req, res) => {
     // Income vs Expenses by month
     const monthMap = {};
     txs.forEach(t => {
-      const key = (t.date || '').slice(0,7); // YYYY-MM
+      const key = (t.date || '').slice(0, 7); // YYYY-MM
       if (!key) return;
       if (!monthMap[key]) monthMap[key] = { Month: key, Income: 0, Expense: 0 };
       if (t.type === 'income') monthMap[key].Income += Number(t.amount);
       else if (t.type === 'expense') monthMap[key].Expense += Number(t.amount);
     });
-    const incomeVsExpenseRows = Object.values(monthMap).sort((a,b)=>a.Month.localeCompare(b.Month));
+    const incomeVsExpenseRows = Object.values(monthMap).sort((a, b) => a.Month.localeCompare(b.Month));
 
     // Category totals (expenses only)
     const categoryMap = {};
-    txs.filter(t=>t.type==='expense').forEach(t=>{
+    txs.filter(t => t.type === 'expense').forEach(t => {
       const name = t.Category?.name || 'Uncategorized';
       if (!categoryMap[name]) categoryMap[name] = { Category: name, Amount: 0 };
       categoryMap[name].Amount += Number(t.amount);
@@ -148,11 +149,11 @@ router.get('/export', async (req, res) => {
 
     // Per card totals (expenses only)
     const perCardMap = {};
-    txs.filter(t=>t.paymentMethod==='card' && t.type==='expense').forEach(t=>{
+    txs.filter(t => t.paymentMethod === 'card' && t.type === 'expense').forEach(t => {
       const name = t.Card?.name || 'Unknown';
-      perCardMap[name] = (perCardMap[name]||0) + Number(t.amount);
+      perCardMap[name] = (perCardMap[name] || 0) + Number(t.amount);
     });
-    const perCardRows = Object.entries(perCardMap).map(([Card, Amount])=>({ Card, Amount }));
+    const perCardRows = Object.entries(perCardMap).map(([Card, Amount]) => ({ Card, Amount }));
 
     // Budget vs Actual (only for a specific month)
     let budgetRows = [];
@@ -169,7 +170,7 @@ router.get('/export', async (req, res) => {
         { Metric: 'Consumed %', Value: consumedRatio }
       ];
     } else {
-      budgetRows = [ { Note: 'Budget vs Actual is only available for a specific month.' } ];
+      budgetRows = [{ Note: 'Budget vs Actual is only available for a specific month.' }];
     }
 
     // Build workbook with multiple sheets using ExcelJS with styling
@@ -249,7 +250,7 @@ router.get('/export', async (req, res) => {
 
     const buf = await wb.xlsx.writeBuffer();
     const filename = (selYear && selMonth)
-      ? `transactions_${String(selYear)}-${String(selMonth).padStart(2,'0')}.xlsx`
+      ? `transactions_${String(selYear)}-${String(selMonth).padStart(2, '0')}.xlsx`
       : 'transactions_all.xlsx';
     res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

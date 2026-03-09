@@ -26,6 +26,14 @@ export const connectDB = async () => {
     if (!descTrans.AccountId) {
       await qi.addColumn('Transactions', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
     }
+
+    const descSched = await qi.describeTable('ScheduledPayments').catch(() => ({}));
+    if (!descSched.paymentMethod) {
+      await qi.addColumn('ScheduledPayments', 'paymentMethod', { type: DataTypes.ENUM('card', 'cash', 'account'), allowNull: true });
+    }
+    if (!descSched.AccountId) {
+      await qi.addColumn('ScheduledPayments', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
+    }
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {
       await qi.addColumn('Users', 'publicId', { type: DataTypes.UUID, allowNull: true, unique: true });
