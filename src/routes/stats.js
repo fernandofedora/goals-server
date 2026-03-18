@@ -81,8 +81,17 @@ router.get('/summary', async (req, res) => {
       account: txs.filter(t => t.type === 'income' && t.AccountId).reduce((a, b) => a + Number(b.amount), 0),
     };
 
+    // Income categories (income by category)
+    const incomeCategoryMap = {};
+    txs.filter(t => t.type === 'income').forEach(t => {
+      const name = t.Category?.name || 'Uncategorized';
+      const color = t.Category?.color || '#10b981';
+      if (!incomeCategoryMap[name]) incomeCategoryMap[name] = { name, amount: 0, color };
+      incomeCategoryMap[name].amount += Number(t.amount);
+    });
+    const incomeCategories = Object.values(incomeCategoryMap);
 
-    res.json({ totals, categories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
+    res.json({ totals, categories, incomeCategories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
