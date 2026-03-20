@@ -17,12 +17,14 @@ const periodFilter = (month, year) => {
 
 router.get('/summary', async (req, res) => {
   try {
-    const { period } = req.query;
+    const { period, from, to } = req.query;
     const where = { UserId: req.userId };
 
-    // Parse period: 'all' or 'YYYY-MM'
+    // Custom date range takes priority over period
     let month = null, year = null;
-    if (period && period !== 'all') {
+    if (from && to) {
+      where.date = { [Op.between]: [from, to] };
+    } else if (period && period !== 'all') {
       const parts = String(period).split('-');
       year = Number(parts[0]); month = Number(parts[1]);
       if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
@@ -100,10 +102,12 @@ router.get('/summary', async (req, res) => {
 
 router.get('/export', async (req, res) => {
   try {
-    const { period } = req.query;
+    const { period, from, to } = req.query;
     const where = { UserId: req.userId };
     let selMonth = null, selYear = null;
-    if (period && period !== 'all') {
+    if (from && to) {
+      where.date = { [Op.between]: [from, to] };
+    } else if (period && period !== 'all') {
       const parts = String(period).split('-');
       selYear = Number(parts[0]); selMonth = Number(parts[1]);
       if (!selYear || !selMonth) return res.status(400).json({ message: 'Invalid period' });
@@ -258,9 +262,11 @@ router.get('/export', async (req, res) => {
     wsPerCard.getColumn('Amount').numFmt = '0.00';
 
     const buf = await wb.xlsx.writeBuffer();
-    const filename = (selYear && selMonth)
-      ? `transactions_${String(selYear)}-${String(selMonth).padStart(2, '0')}.xlsx`
-      : 'transactions_all.xlsx';
+    const filename = (from && to)
+      ? `transactions_${from}_to_${to}.xlsx`
+      : (selYear && selMonth)
+        ? `transactions_${String(selYear)}-${String(selMonth).padStart(2, '00')}.xlsx`
+        : 'transactions_all.xlsx';
     res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(Buffer.from(buf));
