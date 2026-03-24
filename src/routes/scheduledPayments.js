@@ -1,9 +1,72 @@
 import express from 'express';
+import { Op } from 'sequelize';
 import { authMiddleware } from '../middleware/auth.js';
-import { ScheduledPayment, Category, Card, Account } from '../models/index.js';
+import { ScheduledPayment, Category, Card, Account, Transaction } from '../models/index.js';
 
 const router = express.Router();
 router.use(authMiddleware);
+
+// @route   POST api/scheduled-payments/run-now
+// @desc    [TEMP TEST ENDPOINT] Trigger scheduled payment processing immediately for the current user
+// @access  Private
+// TODO: Remove this endpoint after verification
+router.post('/run-now', async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const scheduledPayments = await ScheduledPayment.findAll({
+      where: {
+        UserId: req.userId,
+        status: 'active',
+        nextDueDate: { [Op.lte]: today },
+      },
+    });
+
+    const processed = [];
+
+    for (const payment of scheduledPayments) {
+      await Transaction.create({
+        UserId: payment.UserId,
+        type: payment.type,
+        amount: payment.amount,
+        CategoryId: payment.CategoryId,
+        CardId: payment.paymentMethod === 'card' ? payment.CardId : null,
+        AccountId: payment.paymentMethod === 'account' ? payment.AccountId : null,
+        date: payment.nextDueDate,
+        description: `Scheduled: ${payment.name}`,
+        paymentMethod: payment.paymentMethod,
+      });
+
+      const newNextDueDate = new Date(payment.nextDueDate + 'T00:00:00');
+      switch (payment.period) {
+        case 'daily':      newNextDueDate.setDate(newNextDueDate.getDate() + 1); break;
+        case 'weekly':     newNextDueDate.setDate(newNextDueDate.getDate() + 7); break;
+        case 'bi-weekly':  newNextDueDate.setDate(newNextDueDate.getDate() + 14); break;
+        case 'monthly':    newNextDueDate.setMonth(newNextDueDate.getMonth() + 1); break;
+        case 'quarterly':  newNextDueDate.setMonth(newNextDueDate.getMonth() + 3); break;
+        case 'yearly':     newNextDueDate.setFullYear(newNextDueDate.getFullYear() + 1); break;
+      }
+      payment.nextDueDate = newNextDueDate;
+
+      if (payment.occurrences) {
+        payment.occurrences -= 1;
+        if (payment.occurrences === 0) payment.status = 'paused';
+      }
+      if (payment.endDate && newNextDueDate > payment.endDate) {
+        payment.status = 'paused';
+      }
+
+      await payment.save();
+      processed.push({ name: payment.name, period: payment.period, newNextDueDate: payment.nextDueDate });
+    }
+
+    res.json({ processed: processed.length, details: processed });
+  } catch (err) {
+    console.error('Error running scheduled payments manually:', err);
+    res.status(500).send('Server Error');
+  }
+});
 
 // @route   POST api/scheduled-payments
 // @desc    Create a scheduled payment

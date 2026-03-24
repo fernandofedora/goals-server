@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { Op } from 'sequelize';
 import { ScheduledPayment, Transaction } from './models/index.js';
 
 // Schedule a task to run every day at midnight
@@ -8,28 +9,34 @@ cron.schedule('0 0 * * *', async () => {
   today.setHours(0, 0, 0, 0);
 
   try {
+    // Bug fix #1: use Sequelize Op.lte instead of MongoDB-style $lte
     const scheduledPayments = await ScheduledPayment.findAll({
       where: {
         status: 'active',
-        nextDueDate: { $lte: today },
+        nextDueDate: { [Op.lte]: today },
       },
     });
 
+    console.log(`Found ${scheduledPayments.length} scheduled payment(s) to process.`);
+
     for (const payment of scheduledPayments) {
-      // Create a new transaction
+      // Bug fix #2: use the stored paymentMethod instead of hardcoding 'card'
       await Transaction.create({
         UserId: payment.UserId,
         type: payment.type,
         amount: payment.amount,
         CategoryId: payment.CategoryId,
-        CardId: payment.CardId,
+        CardId: payment.paymentMethod === 'card' ? payment.CardId : null,
+        AccountId: payment.paymentMethod === 'account' ? payment.AccountId : null,
         date: payment.nextDueDate,
         description: `Scheduled: ${payment.name}`,
-        paymentMethod: 'card' // Assuming card payment for now
+        paymentMethod: payment.paymentMethod,
       });
 
       // Update the next due date
-      const newNextDueDate = new Date(payment.nextDueDate);
+      // Use 'T00:00:00' suffix to force local timezone parsing (not UTC),
+      // so setDate() arithmetic is always accurate regardless of server timezone.
+      const newNextDueDate = new Date(payment.nextDueDate + 'T00:00:00');
       switch (payment.period) {
         case 'daily':
           newNextDueDate.setDate(newNextDueDate.getDate() + 1);
@@ -66,6 +73,7 @@ cron.schedule('0 0 * * *', async () => {
       }
 
       await payment.save();
+      console.log(`Processed payment: "${payment.name}" (${payment.period}) → next due: ${payment.nextDueDate}`);
     }
   } catch (err) {
     console.error('Error processing scheduled payments:', err);
