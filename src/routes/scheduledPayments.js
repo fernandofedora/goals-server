@@ -26,39 +26,43 @@ router.post('/run-now', async (req, res) => {
     const processed = [];
 
     for (const payment of scheduledPayments) {
-      await Transaction.create({
-        UserId: payment.UserId,
-        type: payment.type,
-        amount: payment.amount,
-        CategoryId: payment.CategoryId,
-        CardId: payment.paymentMethod === 'card' ? payment.CardId : null,
-        AccountId: payment.paymentMethod === 'account' ? payment.AccountId : null,
-        date: payment.nextDueDate,
-        description: `Scheduled: ${payment.name}`,
-        paymentMethod: payment.paymentMethod,
-      });
+      try {
+        await Transaction.create({
+          UserId: payment.UserId,
+          type: payment.type,
+          amount: payment.amount,
+          CategoryId: payment.CategoryId,
+          CardId: payment.paymentMethod === 'card' ? payment.CardId : null,
+          AccountId: payment.paymentMethod === 'account' ? payment.AccountId : null,
+          date: payment.nextDueDate,
+          description: `Scheduled: ${payment.name}`,
+          paymentMethod: (payment.paymentMethod === 'card') ? 'card' : 'cash',
+        });
 
-      const newNextDueDate = new Date(payment.nextDueDate + 'T00:00:00');
-      switch (payment.period) {
-        case 'daily':      newNextDueDate.setDate(newNextDueDate.getDate() + 1); break;
-        case 'weekly':     newNextDueDate.setDate(newNextDueDate.getDate() + 7); break;
-        case 'bi-weekly':  newNextDueDate.setDate(newNextDueDate.getDate() + 14); break;
-        case 'monthly':    newNextDueDate.setMonth(newNextDueDate.getMonth() + 1); break;
-        case 'quarterly':  newNextDueDate.setMonth(newNextDueDate.getMonth() + 3); break;
-        case 'yearly':     newNextDueDate.setFullYear(newNextDueDate.getFullYear() + 1); break;
-      }
-      payment.nextDueDate = newNextDueDate;
+        const newNextDueDate = new Date(payment.nextDueDate + 'T00:00:00');
+        switch (payment.period) {
+          case 'daily':      newNextDueDate.setDate(newNextDueDate.getDate() + 1); break;
+          case 'weekly':     newNextDueDate.setDate(newNextDueDate.getDate() + 7); break;
+          case 'bi-weekly':  newNextDueDate.setDate(newNextDueDate.getDate() + 14); break;
+          case 'monthly':    newNextDueDate.setMonth(newNextDueDate.getMonth() + 1); break;
+          case 'quarterly':  newNextDueDate.setMonth(newNextDueDate.getMonth() + 3); break;
+          case 'yearly':     newNextDueDate.setFullYear(newNextDueDate.getFullYear() + 1); break;
+        }
+        payment.nextDueDate = newNextDueDate;
 
-      if (payment.occurrences) {
-        payment.occurrences -= 1;
-        if (payment.occurrences === 0) payment.status = 'paused';
-      }
-      if (payment.endDate && newNextDueDate > payment.endDate) {
-        payment.status = 'paused';
-      }
+        if (payment.occurrences) {
+          payment.occurrences -= 1;
+          if (payment.occurrences === 0) payment.status = 'paused';
+        }
+        if (payment.endDate && newNextDueDate > payment.endDate) {
+          payment.status = 'paused';
+        }
 
-      await payment.save();
-      processed.push({ name: payment.name, period: payment.period, newNextDueDate: payment.nextDueDate });
+        await payment.save();
+        processed.push({ name: payment.name, period: payment.period, newNextDueDate: payment.nextDueDate });
+      } catch (innerErr) {
+        console.error(`Error processing individual payment ${payment.id} in run-now:`, innerErr);
+      }
     }
 
     res.json({ processed: processed.length, details: processed });
