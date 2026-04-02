@@ -62,9 +62,9 @@ router.get('/summary', async (req, res) => {
 
     // Payment methods breakdown (expenses only)
     const paymentMethods = {
-      cash: txs.filter(t => t.paymentMethod === 'cash' && !t.AccountId && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
+      cash: txs.filter(t => t.paymentMethod === 'cash' && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
       card: txs.filter(t => t.paymentMethod === 'card' && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
-      account: txs.filter(t => t.AccountId && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0)
+      account: txs.filter(t => t.paymentMethod === 'account' && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0)
     };
 
     // Per card breakdown (expenses only)
@@ -79,8 +79,8 @@ router.get('/summary', async (req, res) => {
 
     // Income methods breakdown
     const incomeMethods = {
-      cash: txs.filter(t => t.type === 'income' && !t.AccountId).reduce((a, b) => a + Number(b.amount), 0),
-      account: txs.filter(t => t.type === 'income' && t.AccountId).reduce((a, b) => a + Number(b.amount), 0),
+      cash: txs.filter(t => t.type === 'income' && t.paymentMethod === 'cash').reduce((a, b) => a + Number(b.amount), 0),
+      account: txs.filter(t => t.type === 'income' && t.paymentMethod === 'account').reduce((a, b) => a + Number(b.amount), 0),
     };
 
     // Income categories (income by category)
@@ -126,7 +126,7 @@ router.get('/export', async (req, res) => {
       Category: t.Category?.name || '',
       Amount: Number(t.amount),
       Date: t.date,
-      PaymentMethod: (t.type === 'expense' && t.AccountId) ? 'account' : t.paymentMethod,
+      PaymentMethod: t.paymentMethod,
       Card: t.Card?.name || ''
     }));
 

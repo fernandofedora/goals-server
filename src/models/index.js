@@ -30,7 +30,7 @@ export const Transaction = sequelize.define('Transaction', {
   description: { type: DataTypes.STRING, allowNull: false },
   amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   date: { type: DataTypes.DATEONLY, allowNull: false },
-  paymentMethod: { type: DataTypes.ENUM('cash', 'card'), allowNull: false },
+  paymentMethod: { type: DataTypes.ENUM('cash', 'card', 'account'), allowNull: false },
   AccountId: { type: DataTypes.INTEGER, allowNull: true }
 });
 
