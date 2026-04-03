@@ -31,8 +31,7 @@ cron.schedule('0 0 * * *', async () => {
           AccountId: payment.paymentMethod === 'account' ? payment.AccountId : null,
           date: payment.nextDueDate,
           description: `Scheduled: ${payment.name}`,
-          // Transaction expects 'cash' or 'card'. If ScheduledPayment has 'account' or null, we map it to 'cash'.
-          paymentMethod: (payment.paymentMethod === 'card') ? 'card' : 'cash',
+          paymentMethod: payment.paymentMethod || 'cash',
         });
 
         // Update the next due date

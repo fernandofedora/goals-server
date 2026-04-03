@@ -36,7 +36,7 @@ router.post('/run-now', async (req, res) => {
           AccountId: payment.paymentMethod === 'account' ? payment.AccountId : null,
           date: payment.nextDueDate,
           description: `Scheduled: ${payment.name}`,
-          paymentMethod: (payment.paymentMethod === 'card') ? 'card' : 'cash',
+          paymentMethod: payment.paymentMethod || 'cash',
         });
 
         const newNextDueDate = new Date(payment.nextDueDate + 'T00:00:00');
