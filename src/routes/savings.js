@@ -38,6 +38,9 @@ router.put('/plans/:id', async (req, res) => {
   const plan = await SavingsPlan.findOne({ where: { id: req.params.id, UserId: req.userId } });
   if (!plan) return res.status(404).json({ message: 'Plan no encontrado' });
   const { name, targetAmount, linkedCategoryId, status } = req.body;
+  if (!name || !targetAmount || Number(targetAmount) <= 0) {
+    return res.status(400).json({ message: 'Datos inválidos' });
+  }
   let categoryId = linkedCategoryId === undefined ? plan.linkedCategoryId : (linkedCategoryId || null);
   if (categoryId) {
     const cat = await Category.findOne({ where: { id: categoryId, UserId: req.userId } });
