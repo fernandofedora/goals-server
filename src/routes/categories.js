@@ -11,8 +11,9 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { name, color, type } = req.body;
-  const item = await Category.create({ name, color, type, UserId: req.userId });
+  const { name, color, type, monthlyBudget } = req.body;
+  const budget = monthlyBudget !== undefined && monthlyBudget !== '' ? Number(monthlyBudget) : null;
+  const item = await Category.create({ name, color, type, monthlyBudget: budget, UserId: req.userId });
   const plain = item.toJSON();
   delete plain.UserId;
   res.json(plain);
@@ -21,8 +22,9 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const item = await Category.findOne({ where: { id: req.params.id, UserId: req.userId } });
   if (!item) return res.status(404).json({ message: 'Not found' });
-  const { name, color, type } = req.body;
-  await item.update({ name, color, type });
+  const { name, color, type, monthlyBudget } = req.body;
+  const budget = monthlyBudget !== undefined && monthlyBudget !== '' ? Number(monthlyBudget) : null;
+  await item.update({ name, color, type, monthlyBudget: budget });
   const plain = item.toJSON();
   delete plain.UserId;
   res.json(plain);

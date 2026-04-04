@@ -59,6 +59,13 @@ export const connectDB = async () => {
     if (!descSched.AccountId) {
       await qi.addColumn('ScheduledPayments', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
     }
+
+    // Add monthlyBudget to Categories if not present
+    const descCats = await qi.describeTable('Categories').catch(() => ({}));
+    if (!descCats.monthlyBudget) {
+      await qi.addColumn('Categories', 'monthlyBudget', { type: DataTypes.DECIMAL(10, 2), allowNull: true, defaultValue: null });
+      console.log('Migration: added Categories.monthlyBudget column');
+    }
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {
       await qi.addColumn('Users', 'publicId', { type: DataTypes.UUID, allowNull: true, unique: true });
