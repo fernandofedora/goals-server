@@ -83,6 +83,12 @@ router.post('/', async (req, res) => {
     if (!name || !type || !amount || !period || !CategoryId || !startDate || !paymentMethod || !endDate) {
       return res.status(400).json({ msg: 'Please enter all required fields' });
     }
+    if (paymentMethod === 'card' && !CardId) {
+      return res.status(400).json({ msg: 'Credit card is required when payment method is card' });
+    }
+    if (paymentMethod === 'account' && !AccountId) {
+      return res.status(400).json({ msg: 'Bank account is required when payment method is account' });
+    }
 
     const newScheduledPayment = await ScheduledPayment.create({
       UserId: req.userId,
@@ -135,6 +141,13 @@ router.put('/:id', async (req, res) => {
     let scheduledPayment = await ScheduledPayment.findByPk(req.params.id);
 
     if (!scheduledPayment) return res.status(404).json({ msg: 'Scheduled payment not found' });
+
+    if (paymentMethod === 'card' && !CardId) {
+      return res.status(400).json({ msg: 'Credit card is required when payment method is card' });
+    }
+    if (paymentMethod === 'account' && !AccountId) {
+      return res.status(400).json({ msg: 'Bank account is required when payment method is account' });
+    }
 
     // Make sure user owns scheduled payment
     if (scheduledPayment.UserId !== req.userId) {
