@@ -27,12 +27,44 @@ export const connectDB = async () => {
       await qi.addColumn('Transactions', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
     }
 
+    // Expand Transactions.paymentMethod ENUM to include 'account'
+    // We use a raw ALTER TABLE because Sequelize's changeColumn may not
+    // always update an existing ENUM safely on MySQL.
+    try {
+      await sequelize.query(
+        "ALTER TABLE `Transactions` MODIFY COLUMN `paymentMethod` ENUM('cash','card','account') NOT NULL"
+      );
+      console.log('Transactions.paymentMethod ENUM expanded to include account');
+    } catch (enumErr) {
+      // Already includes 'account' or another harmless error — safe to ignore
+      if (!enumErr.message?.includes("can't change column") &&
+          !enumErr.message?.includes('already')) {
+        console.warn('Could not expand Transactions paymentMethod ENUM:', enumErr.message);
+      }
+    }
+
+    // Data migration: fix legacy rows that have an AccountId but were saved
+    // as paymentMethod='cash' due to the old workaround.
+    const [migrationResult] = await sequelize.query(
+      "UPDATE `Transactions` SET `paymentMethod` = 'account' WHERE `AccountId` IS NOT NULL AND `paymentMethod` = 'cash'"
+    );
+    if (migrationResult.affectedRows > 0) {
+      console.log(`Migration: updated ${migrationResult.affectedRows} transaction(s) from paymentMethod='cash' → 'account' (had AccountId)`);
+    }
+
     const descSched = await qi.describeTable('ScheduledPayments').catch(() => ({}));
     if (!descSched.paymentMethod) {
       await qi.addColumn('ScheduledPayments', 'paymentMethod', { type: DataTypes.ENUM('card', 'cash', 'account'), allowNull: true });
     }
     if (!descSched.AccountId) {
       await qi.addColumn('ScheduledPayments', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
+    }
+
+    // Add monthlyBudget to Categories if not present
+    const descCats = await qi.describeTable('Categories').catch(() => ({}));
+    if (!descCats.monthlyBudget) {
+      await qi.addColumn('Categories', 'monthlyBudget', { type: DataTypes.DECIMAL(10, 2), allowNull: true, defaultValue: null });
+      console.log('Migration: added Categories.monthlyBudget column');
     }
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {

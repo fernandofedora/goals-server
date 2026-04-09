@@ -14,7 +14,8 @@ export const Category = sequelize.define('Category', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
   color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#3b82f6' },
-  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false }
+  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false },
+  monthlyBudget: { type: DataTypes.DECIMAL(10, 2), allowNull: true, defaultValue: null }
 });
 
 export const Card = sequelize.define('Card', {
@@ -30,7 +31,7 @@ export const Transaction = sequelize.define('Transaction', {
   description: { type: DataTypes.STRING, allowNull: false },
   amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   date: { type: DataTypes.DATEONLY, allowNull: false },
-  paymentMethod: { type: DataTypes.ENUM('cash', 'card'), allowNull: false },
+  paymentMethod: { type: DataTypes.ENUM('cash', 'card', 'account'), allowNull: false },
   AccountId: { type: DataTypes.INTEGER, allowNull: true }
 });
 
