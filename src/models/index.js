@@ -14,7 +14,8 @@ export const Category = sequelize.define('Category', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
   color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#3b82f6' },
-  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false }
+  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false },
+  monthlyBudget: { type: DataTypes.DECIMAL(10, 2), allowNull: true, defaultValue: null }
 });
 
 export const Card = sequelize.define('Card', {
