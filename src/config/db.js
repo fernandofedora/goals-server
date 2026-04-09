@@ -73,6 +73,14 @@ export const connectDB = async () => {
     if (!desc.lastLoginAt) {
       await qi.addColumn('Users', 'lastLoginAt', { type: DataTypes.DATE, allowNull: true });
     }
+    if (!desc.isSuperAdmin) {
+      await qi.addColumn('Users', 'isSuperAdmin', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false });
+      console.log('Migration: added Users.isSuperAdmin column');
+    }
+    if (!desc.isActive) {
+      await qi.addColumn('Users', 'isActive', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true });
+      console.log('Migration: added Users.isActive column');
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query('SELECT id FROM `Users` WHERE `publicId` IS NULL');
     for (const r of rows) {
