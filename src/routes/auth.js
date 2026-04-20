@@ -36,12 +36,13 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
     const user = await User.findOne({ where: { email } });
     if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!user.isActive) return res.status(403).json({ message: 'Account disabled. Contact an administrator.' });
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
-    const token = jwt.sign({ id: user.id }, process.env.SECRET_KEY, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, isSuperAdmin: user.isSuperAdmin }, process.env.SECRET_KEY, { expiresIn: '7d' });
     const now = new Date();
     await user.update({ lastLoginAt: now });
-    res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email, createdAt: user.createdAt, lastLoginAt: now } });
+    res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email, createdAt: user.createdAt, lastLoginAt: now, isSuperAdmin: user.isSuperAdmin } });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -65,6 +66,24 @@ router.post('/reset', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     await user.update({ passwordHash });
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ message: 'Server error' }); }
+});
+
+// ─── POST /api/auth/bootstrap ───────────────────────────────────────────────
+// One-time route to promote an existing user to Super Admin.
+// Requires the BOOTSTRAP_SECRET env variable as the Authorization header value.
+router.post('/bootstrap', async (req, res) => {
+  try {
+    const secret = req.headers.authorization;
+    if (!secret || secret !== process.env.BOOTSTRAP_SECRET) {
+      return res.status(403).json({ message: 'Invalid bootstrap secret' });
+    }
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email required' });
+    const user = await User.findOne({ where: { email } });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    await user.update({ isSuperAdmin: true, isActive: true });
+    res.json({ success: true, message: `${user.name} (${user.email}) is now a Super Admin.` });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
 
