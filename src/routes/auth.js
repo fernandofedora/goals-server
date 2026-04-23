@@ -1,7 +1,9 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 import { User, Category } from '../models/index.js';
+import { sendVerificationEmail, sendResetPasswordEmail } from '../utils/mail.js';
 
 const router = express.Router();
 
@@ -9,9 +11,18 @@ router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     const existing = await User.findOne({ where: { email } });
-    if (existing) return res.status(400).json({ message: 'Email already registered' });
+    if (existing) return res.status(400).json({ message: 'El correo electrónico ya está registrado' });
+    
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, email, passwordHash });
+    const verificationToken = uuidv4();
+    
+    const user = await User.create({ 
+      name, 
+      email, 
+      passwordHash,
+      isEmailVerified: false,
+      verificationToken
+    });
 
     try {
       const defaults = [
@@ -27,46 +38,111 @@ router.post('/register', async (req, res) => {
     } catch (err) {
       console.error('Failed to create default categories for new user:', err);
     }
-    res.json({ publicId: user.publicId, name: user.name, email: user.email });
-  } catch (e) { res.status(500).json({ message: 'Server error' }); }
+
+    try {
+      await sendVerificationEmail(email, name, verificationToken);
+    } catch (mailErr) {
+      console.error('Failed to send verification email:', mailErr);
+      // We still registered the user, but they might need a way to resend the email
+    }
+
+    res.json({ message: 'Registro exitoso. Por favor verifica tu correo electrónico.' });
+  } catch (e) { 
+    console.error(e);
+    res.status(500).json({ message: 'Error del servidor' }); 
+  }
 });
 
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ where: { email } });
-    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-    if (!user.isActive) return res.status(403).json({ message: 'Account disabled. Contact an administrator.' });
+    if (!user) return res.status(400).json({ message: 'Credenciales inválidas' });
+    if (!user.isActive) return res.status(403).json({ message: 'Cuenta desactivada. Contacta a un administrador.' });
+    if (!user.isEmailVerified) return res.status(403).json({ message: 'Por favor verifica tu correo electrónico para iniciar sesión.' });
+    
     const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
+    if (!ok) return res.status(400).json({ message: 'Credenciales inválidas' });
+    
     const token = jwt.sign({ id: user.id, isSuperAdmin: user.isSuperAdmin }, process.env.SECRET_KEY, { expiresIn: '7d' });
     const now = new Date();
     await user.update({ lastLoginAt: now });
     res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email, createdAt: user.createdAt, lastLoginAt: now, isSuperAdmin: user.isSuperAdmin } });
-  } catch (e) { res.status(500).json({ message: 'Server error' }); }
+  } catch (e) { res.status(500).json({ message: 'Error del servidor' }); }
 });
 
-// Start password reset: verify email exists
+router.get('/verify-email/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    if (!token) return res.status(400).json({ message: 'Token requerido' });
+
+    const user = await User.findOne({ where: { verificationToken: token } });
+    
+    if (!user) {
+      return res.status(400).json({ message: 'El enlace es inválido o ya ha sido utilizado.' });
+    }
+    
+    await user.update({ isEmailVerified: true, verificationToken: null });
+    res.json({ message: 'Cuenta verificada exitosamente. Ya puedes iniciar sesión.' });
+  } catch (e) { res.status(500).json({ message: 'Error del servidor' }); }
+});
+
+// Start password reset: send email with token
 router.post('/reset-start', async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) return res.status(400).json({ message: 'Email required' });
+    if (!email) return res.status(400).json({ message: 'Email requerido' });
+    
     const user = await User.findOne({ where: { email } });
-    res.json({ exists: !!user });
-  } catch (e) { res.status(500).json({ message: 'Server error' }); }
+    if (!user) {
+      // For security, don't reveal if user exists, but we can if the business requires it.
+      // Usually better to return success anyway.
+      return res.json({ message: 'Si el correo existe, se enviará un enlace de recuperación.' });
+    }
+
+    const resetToken = uuidv4();
+    const expires = new Date(Date.now() + 3600000); // 1 hour
+
+    await user.update({ 
+      resetPasswordToken: resetToken, 
+      resetPasswordExpires: expires 
+    });
+
+    try {
+      await sendResetPasswordEmail(user.email, user.name, resetToken);
+    } catch (mailErr) {
+      console.error('Failed to send reset email:', mailErr);
+    }
+
+    res.json({ message: 'Se ha enviado un enlace de recuperación a tu correo.' });
+  } catch (e) { res.status(500).json({ message: 'Error del servidor' }); }
 });
 
-// Complete password reset: update password for given email
-router.post('/reset', async (req, res) => {
+// Complete password reset: update password using token
+router.post('/reset-password', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ message: 'Email and password required' });
-    const user = await User.findOne({ where: { email } });
-    if (!user) return res.status(404).json({ message: 'Email not found' });
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ message: 'Token y contraseña requeridos' });
+    
+    const { Op } = (await import('sequelize')).default;
+    const user = await User.findOne({ 
+      where: { 
+        resetPasswordToken: token,
+        resetPasswordExpires: { [Op.gt]: new Date() }
+      } 
+    });
+
+    if (!user) return res.status(400).json({ message: 'Token inválido o expirado' });
+    
     const passwordHash = await bcrypt.hash(password, 10);
-    await user.update({ passwordHash });
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ message: 'Server error' }); }
+    await user.update({ 
+      passwordHash,
+      resetPasswordToken: null,
+      resetPasswordExpires: null
+    });
+
+    res.json({ message: 'Contraseña actualizada correctamente.' });
+  } catch (e) { res.status(500).json({ message: 'Error del servidor' }); }
 });
 
 // ─── POST /api/auth/bootstrap ───────────────────────────────────────────────
