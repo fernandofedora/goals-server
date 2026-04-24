@@ -15,7 +15,8 @@ router.get('/me', authMiddleware, async (req, res) => {
       name: user.name,
       email: user.email,
       createdAt: user.createdAt,
-      lastLoginAt: user.lastLoginAt
+      lastLoginAt: user.lastLoginAt,
+      isSuperAdmin: user.isSuperAdmin
     });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });

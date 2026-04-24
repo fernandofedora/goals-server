@@ -7,7 +7,13 @@ export const User = sequelize.define('User', {
   name: { type: DataTypes.STRING, allowNull: false },
   email: { type: DataTypes.STRING, allowNull: false, unique: true },
   passwordHash: { type: DataTypes.STRING, allowNull: false },
-  lastLoginAt: { type: DataTypes.DATE, allowNull: true }
+  lastLoginAt: { type: DataTypes.DATE, allowNull: true },
+  isSuperAdmin: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+  isEmailVerified: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  verificationToken: { type: DataTypes.STRING, allowNull: true },
+  resetPasswordToken: { type: DataTypes.STRING, allowNull: true },
+  resetPasswordExpires: { type: DataTypes.DATE, allowNull: true }
 });
 
 export const Category = sequelize.define('Category', {
