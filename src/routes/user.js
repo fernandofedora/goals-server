@@ -16,18 +16,20 @@ router.get('/me', authMiddleware, async (req, res) => {
       email: user.email,
       createdAt: user.createdAt,
       lastLoginAt: user.lastLoginAt,
-      isSuperAdmin: user.isSuperAdmin
+      isSuperAdmin: user.isSuperAdmin,
+      currency: user.currency || 'USD'
     });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
 
 router.put('/profile', authMiddleware, rateLimit((req) => `profile:${req.userId}`), async (req, res) => {
   try {
-    const { name, email, currentPassword } = req.body;
+    const { name, email, currentPassword, currency } = req.body;
     const user = await User.findByPk(req.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
     const updates = {};
     if (name) updates.name = name;
+    if (currency) updates.currency = currency;
     if (email && email !== user.email) {
       if (!currentPassword) return res.status(400).json({ message: 'Current password required to change email' });
       const ok = await bcrypt.compare(currentPassword, user.passwordHash);
@@ -35,7 +37,7 @@ router.put('/profile', authMiddleware, rateLimit((req) => `profile:${req.userId}
       updates.email = email;
     }
     await user.update(updates);
-    res.json({ publicId: user.publicId, name: user.name, email: user.email });
+    res.json({ publicId: user.publicId, name: user.name, email: user.email, currency: user.currency || 'USD' });
   } catch (e) { res.status(500).json({ message: 'Server error' }); }
 });
 

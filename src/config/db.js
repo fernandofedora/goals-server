@@ -96,6 +96,10 @@ export const connectDB = async () => {
     if (!desc.resetPasswordExpires) {
       await qi.addColumn('Users', 'resetPasswordExpires', { type: DataTypes.DATE, allowNull: true });
     }
+    if (!desc.currency) {
+      await qi.addColumn('Users', 'currency', { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'USD' });
+      console.log('Migration: added Users.currency column');
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query('SELECT id FROM `Users` WHERE `publicId` IS NULL');
     for (const r of rows) {
