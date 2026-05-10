@@ -13,7 +13,8 @@ export const User = sequelize.define('User', {
   isEmailVerified: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   verificationToken: { type: DataTypes.STRING, allowNull: true },
   resetPasswordToken: { type: DataTypes.STRING, allowNull: true },
-  resetPasswordExpires: { type: DataTypes.DATE, allowNull: true }
+  resetPasswordExpires: { type: DataTypes.DATE, allowNull: true },
+  currency: { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'USD' }
 });
 
 export const Category = sequelize.define('Category', {
