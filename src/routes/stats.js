@@ -25,12 +25,17 @@ router.get('/summary', async (req, res) => {
     if (from && to) {
       where.date = { [Op.between]: [from, to] };
     } else if (period && period !== 'all') {
-      const parts = String(period).split('-');
-      year = Number(parts[0]); month = Number(parts[1]);
-      if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
-      const start = `${year}-${String(month).padStart(2, '0')}-01`;
-      const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
-      where.date = { [Op.between]: [start, end] };
+      if (/^\d{4}$/.test(String(period))) {
+        year = Number(period);
+        where.date = { [Op.between]: [`${year}-01-01`, `${year}-12-31`] };
+      } else {
+        const parts = String(period).split('-');
+        year = Number(parts[0]); month = Number(parts[1]);
+        if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
+        const start = `${year}-${String(month).padStart(2, '0')}-01`;
+        const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+        where.date = { [Op.between]: [start, end] };
+      }
     }
 
     const txs = await Transaction.findAll({ where, include: [Category, Card, Account] });
@@ -103,6 +108,123 @@ router.get('/summary', async (req, res) => {
   }
 });
 
+// Monthly / daily evolution of one or more categories.
+// Query: period (all|YYYY|YYYY-MM) or from+to, plus optional categoryIds (CSV).
+router.get('/categories-timeline', async (req, res) => {
+  try {
+    const { period, from, to, categoryIds } = req.query;
+    const userId = req.userId;
+
+    // Parse explicit category filter (CSV → number[]).
+    let catFilter = null;
+    if (categoryIds) {
+      const ids = String(categoryIds).split(',')
+        .map(s => Number(s.trim()))
+        .filter(n => Number.isInteger(n) && n > 0);
+      if (ids.length > 0) catFilter = ids;
+    }
+
+    // Resolve which categories to render. Default: all of user's expense categories.
+    const categoriesWhere = { UserId: userId };
+    if (catFilter) categoriesWhere.id = catFilter;
+    else categoriesWhere.type = 'expense';
+    const cats = await Category.findAll({ where: categoriesWhere });
+    const resolvedIds = cats.map(c => c.id);
+    if (resolvedIds.length === 0) {
+      return res.json({ granularity: 'month', series: [], categories: [] });
+    }
+
+    // Period parsing + granularity decision.
+    const where = { UserId: userId, CategoryId: { [Op.in]: resolvedIds } };
+    let granularity = 'month';
+    let rangeStart = null, rangeEnd = null;
+
+    if (from && to) {
+      where.date = { [Op.between]: [from, to] };
+      rangeStart = from; rangeEnd = to;
+    } else if (period && period !== 'all') {
+      if (/^\d{4}$/.test(String(period))) {
+        const year = Number(period);
+        rangeStart = `${year}-01-01`;
+        rangeEnd = `${year}-12-31`;
+        where.date = { [Op.between]: [rangeStart, rangeEnd] };
+      } else if (/^\d{4}-\d{2}$/.test(String(period))) {
+        const [yStr, mStr] = String(period).split('-');
+        const year = Number(yStr), month = Number(mStr);
+        if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
+        const lastDay = new Date(year, month, 0).getDate();
+        rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
+        rangeEnd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        where.date = { [Op.between]: [rangeStart, rangeEnd] };
+        granularity = 'day';
+      } else {
+        return res.status(400).json({ message: 'Invalid period' });
+      }
+    }
+    // else: period === 'all' (or unset) → no date filter, range derived from data.
+
+    const txs = await Transaction.findAll({ where });
+
+    // For all-time: derive range from data.
+    if (!rangeStart || !rangeEnd) {
+      if (txs.length === 0) {
+        const today = new Date().toISOString().slice(0, 10);
+        rangeStart = today; rangeEnd = today;
+      } else {
+        const dates = txs.map(t => t.date).filter(Boolean).sort();
+        rangeStart = dates[0];
+        rangeEnd = dates[dates.length - 1];
+      }
+    }
+
+    // Build the bucket list (continuous, no gaps).
+    const buckets = [];
+    if (granularity === 'day') {
+      const cur = new Date(`${rangeStart}T00:00:00Z`);
+      const end = new Date(`${rangeEnd}T00:00:00Z`);
+      while (cur <= end) {
+        buckets.push(cur.toISOString().slice(0, 10));
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+    } else {
+      const [sy, sm] = rangeStart.slice(0, 7).split('-').map(Number);
+      const [ey, em] = rangeEnd.slice(0, 7).split('-').map(Number);
+      let y = sy, m = sm;
+      while (y < ey || (y === ey && m <= em)) {
+        buckets.push(`${y}-${String(m).padStart(2, '0')}`);
+        m++;
+        if (m > 12) { m = 1; y++; }
+      }
+    }
+
+    // Initialize series: each bucket starts with 0 for every category.
+    const seriesMap = {};
+    buckets.forEach(b => {
+      const obj = { period: b };
+      resolvedIds.forEach(id => { obj[`cat_${id}`] = 0; });
+      seriesMap[b] = obj;
+    });
+
+    // Aggregate amounts into buckets.
+    txs.forEach(t => {
+      const key = granularity === 'day' ? t.date : String(t.date || '').slice(0, 7);
+      if (!seriesMap[key]) return;
+      const catKey = `cat_${t.CategoryId}`;
+      if (catKey in seriesMap[key]) {
+        seriesMap[key][catKey] += Number(t.amount);
+      }
+    });
+
+    const series = buckets.map(b => seriesMap[b]);
+    const categories = cats.map(c => ({ id: c.id, name: c.name, color: c.color, type: c.type }));
+
+    res.json({ granularity, series, categories });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 router.get('/export', async (req, res) => {
   try {
     const { period, from, to } = req.query;
@@ -111,12 +233,17 @@ router.get('/export', async (req, res) => {
     if (from && to) {
       where.date = { [Op.between]: [from, to] };
     } else if (period && period !== 'all') {
-      const parts = String(period).split('-');
-      selYear = Number(parts[0]); selMonth = Number(parts[1]);
-      if (!selYear || !selMonth) return res.status(400).json({ message: 'Invalid period' });
-      const start = `${selYear}-${String(selMonth).padStart(2, '0')}-01`;
-      const end = `${selYear}-${String(selMonth).padStart(2, '0')}-${String(new Date(selYear, selMonth, 0).getDate()).padStart(2, '0')}`;
-      where.date = { [Op.between]: [start, end] };
+      if (/^\d{4}$/.test(String(period))) {
+        selYear = Number(period);
+        where.date = { [Op.between]: [`${selYear}-01-01`, `${selYear}-12-31`] };
+      } else {
+        const parts = String(period).split('-');
+        selYear = Number(parts[0]); selMonth = Number(parts[1]);
+        if (!selYear || !selMonth) return res.status(400).json({ message: 'Invalid period' });
+        const start = `${selYear}-${String(selMonth).padStart(2, '0')}-01`;
+        const end = `${selYear}-${String(selMonth).padStart(2, '0')}-${String(new Date(selYear, selMonth, 0).getDate()).padStart(2, '0')}`;
+        where.date = { [Op.between]: [start, end] };
+      }
     }
 
     // Load transactions
