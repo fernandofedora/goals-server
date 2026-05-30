@@ -25,12 +25,17 @@ router.get('/summary', async (req, res) => {
     if (from && to) {
       where.date = { [Op.between]: [from, to] };
     } else if (period && period !== 'all') {
-      const parts = String(period).split('-');
-      year = Number(parts[0]); month = Number(parts[1]);
-      if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
-      const start = `${year}-${String(month).padStart(2, '0')}-01`;
-      const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
-      where.date = { [Op.between]: [start, end] };
+      if (/^\d{4}$/.test(String(period))) {
+        year = Number(period);
+        where.date = { [Op.between]: [`${year}-01-01`, `${year}-12-31`] };
+      } else {
+        const parts = String(period).split('-');
+        year = Number(parts[0]); month = Number(parts[1]);
+        if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
+        const start = `${year}-${String(month).padStart(2, '0')}-01`;
+        const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+        where.date = { [Op.between]: [start, end] };
+      }
     }
 
     const txs = await Transaction.findAll({ where, include: [Category, Card, Account] });
@@ -111,12 +116,17 @@ router.get('/export', async (req, res) => {
     if (from && to) {
       where.date = { [Op.between]: [from, to] };
     } else if (period && period !== 'all') {
-      const parts = String(period).split('-');
-      selYear = Number(parts[0]); selMonth = Number(parts[1]);
-      if (!selYear || !selMonth) return res.status(400).json({ message: 'Invalid period' });
-      const start = `${selYear}-${String(selMonth).padStart(2, '0')}-01`;
-      const end = `${selYear}-${String(selMonth).padStart(2, '0')}-${String(new Date(selYear, selMonth, 0).getDate()).padStart(2, '0')}`;
-      where.date = { [Op.between]: [start, end] };
+      if (/^\d{4}$/.test(String(period))) {
+        selYear = Number(period);
+        where.date = { [Op.between]: [`${selYear}-01-01`, `${selYear}-12-31`] };
+      } else {
+        const parts = String(period).split('-');
+        selYear = Number(parts[0]); selMonth = Number(parts[1]);
+        if (!selYear || !selMonth) return res.status(400).json({ message: 'Invalid period' });
+        const start = `${selYear}-${String(selMonth).padStart(2, '0')}-01`;
+        const end = `${selYear}-${String(selMonth).padStart(2, '0')}-${String(new Date(selYear, selMonth, 0).getDate()).padStart(2, '0')}`;
+        where.date = { [Op.between]: [start, end] };
+      }
     }
 
     // Load transactions
