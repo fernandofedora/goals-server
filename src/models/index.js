@@ -69,6 +69,7 @@ export const Account = sequelize.define('Account', {
   name: { type: DataTypes.STRING, allowNull: false },
   color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#a3e635' },
   initialBalance: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+  isExcludedFromTotals: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 });
 
 export const ScheduledPayment = sequelize.define('ScheduledPayment', {

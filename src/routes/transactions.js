@@ -1,4 +1,5 @@
 import express from 'express';
+import { Op } from 'sequelize';
 import { authMiddleware } from '../middleware/auth.js';
 import { Transaction, Category, Card, Account } from '../models/index.js';
 
@@ -10,6 +11,16 @@ router.get('/', async (req, res) => {
   const where = { UserId: req.userId };
   if (cardId) where.CardId = cardId;
   if (accountId) where.AccountId = accountId;
+
+  // General history (no specific card/account requested): hide transactions of
+  // isolated ("no integrar") accounts, but keep account-less ones (cash/card).
+  if (!accountId && !cardId) {
+    const isolated = await Account.findAll({ where: { UserId: req.userId, isExcludedFromTotals: true }, attributes: ['id'] });
+    const isolatedIds = isolated.map(a => a.id);
+    if (isolatedIds.length > 0) {
+      where[Op.or] = [{ AccountId: null }, { AccountId: { [Op.notIn]: isolatedIds } }];
+    }
+  }
 
   const commonOptions = {
     where,
