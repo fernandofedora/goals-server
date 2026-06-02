@@ -66,6 +66,13 @@ export const connectDB = async () => {
       await qi.addColumn('Categories', 'monthlyBudget', { type: DataTypes.DECIMAL(10, 2), allowNull: true, defaultValue: null });
       console.log('Migration: added Categories.monthlyBudget column');
     }
+    // Add isExcludedFromTotals to Accounts (cuentas "no integrar" / aisladas)
+    const descAccts = await qi.describeTable('Accounts').catch(() => ({}));
+    if (!descAccts.isExcludedFromTotals) {
+      await qi.addColumn('Accounts', 'isExcludedFromTotals', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false });
+      console.log('Migration: added Accounts.isExcludedFromTotals column');
+    }
+
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {
       await qi.addColumn('Users', 'publicId', { type: DataTypes.UUID, allowNull: true, unique: true });

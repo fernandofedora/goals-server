@@ -13,9 +13,9 @@ router.get('/', async (req, res) => {
 
 // POST a new account
 router.post('/', async (req, res) => {
-  const { name, color, initialBalance } = req.body;
+  const { name, color, initialBalance, isExcludedFromTotals } = req.body;
   if (!name) return res.status(400).json({ message: 'Name is required' });
-  const item = await Account.create({ name, color, initialBalance: initialBalance || 0, UserId: req.userId });
+  const item = await Account.create({ name, color, initialBalance: initialBalance || 0, isExcludedFromTotals: !!isExcludedFromTotals, UserId: req.userId });
   res.status(201).json(item);
 });
 
@@ -23,8 +23,10 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const item = await Account.findOne({ where: { id: req.params.id, UserId: req.userId } });
   if (!item) return res.status(404).json({ message: 'Not found' });
-  const { name, color, initialBalance } = req.body;
-  await item.update({ name, color, initialBalance });
+  const { name, color, initialBalance, isExcludedFromTotals } = req.body;
+  const fields = { name, color, initialBalance };
+  if (isExcludedFromTotals !== undefined) fields.isExcludedFromTotals = !!isExcludedFromTotals;
+  await item.update(fields);
   res.json(item);
 });
 
