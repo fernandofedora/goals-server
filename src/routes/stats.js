@@ -7,6 +7,15 @@ import { Op } from 'sequelize'
 const router = express.Router();
 router.use(authMiddleware);
 
+// Build a WHERE fragment that excludes transactions belonging to "no integrar"
+// (isolated) accounts, while keeping transactions with no account (cash/card).
+const excludeIsolatedAccounts = async (userId) => {
+  const isolated = await Account.findAll({ where: { UserId: userId, isExcludedFromTotals: true }, attributes: ['id'] });
+  const ids = isolated.map(a => a.id);
+  if (ids.length === 0) return null;
+  return { [Op.or]: [{ AccountId: null }, { AccountId: { [Op.notIn]: ids } }] };
+};
+
 // Helper to get period filter
 const periodFilter = (month, year) => {
   if (!month || !year) return {};
@@ -37,6 +46,10 @@ router.get('/summary', async (req, res) => {
         where.date = { [Op.between]: [start, end] };
       }
     }
+
+    // Exclude isolated ("no integrar") accounts from the general dashboard.
+    const excludeFrag = await excludeIsolatedAccounts(req.userId);
+    if (excludeFrag) Object.assign(where, excludeFrag);
 
     const txs = await Transaction.findAll({ where, include: [Category, Card, Account] });
 
@@ -245,6 +258,10 @@ router.get('/export', async (req, res) => {
         where.date = { [Op.between]: [start, end] };
       }
     }
+
+    // Exclude isolated ("no integrar") accounts from the export too.
+    const excludeFrag = await excludeIsolatedAccounts(req.userId);
+    if (excludeFrag) Object.assign(where, excludeFrag);
 
     // Load transactions
     const txs = await Transaction.findAll({ where, include: [Category, Card] });
