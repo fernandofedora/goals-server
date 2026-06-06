@@ -1,2 +1,6 @@
 node_modules/
 .env
+
+# Local AI agent skills (not part of the app)
+.agents/
+skills-lock.json
