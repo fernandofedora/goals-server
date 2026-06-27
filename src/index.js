@@ -35,10 +35,20 @@ app.use('/api/admin', adminRoutes);
 
 const PORT = process.env.PORT || 4000;
 
-// Connect to the DB first, then run the scheduled-payments catch-up and start
-// listening. The startup catch-up must wait for connectDB() (authenticate +
-// sync + migrations); running it before the connection was ready used to race
-// on cold/managed databases.
-await connectDB();
-processScheduledPayments();
+// Start listening IMMEDIATELY. Hostinger/LiteSpeed (Passenger) marks the app as
+// 503 if app.listen() is delayed behind the DB handshake + migrations, so the
+// HTTP server must come up first and DB init must NOT block module startup
+// (a top-level `await connectDB()` here is what caused the production 503).
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// Initialize the DB (authenticate + sync + migrations) and then run the
+// scheduled-payments catch-up, in the background. Ordering is preserved
+// (connectDB resolves before the catch-up) without blocking the listener.
+(async () => {
+  try {
+    await connectDB();
+    await processScheduledPayments();
+  } catch (err) {
+    console.error('Startup initialization error:', err);
+  }
+})();
