@@ -12,8 +12,8 @@ export const sequelize = new Sequelize(
     host: process.env.MYSQLHOST || process.env.DB_HOST,
     port: process.env.MYSQLPORT || process.env.DB_PORT,
     dialect: 'mysql',
-    logging: false
-  }
+    logging: false,
+  },
 );
 
 export const connectDB = async () => {
@@ -24,7 +24,43 @@ export const connectDB = async () => {
 
     const descTrans = await qi.describeTable('Transactions').catch(() => ({}));
     if (!descTrans.AccountId) {
-      await qi.addColumn('Transactions', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
+      await qi.addColumn('Transactions', 'AccountId', {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      });
+    }
+
+    // Link materialized transactions back to their ScheduledPayment so a unique
+    // (ScheduledPaymentId, date) index can make duplicate materialization of the
+    // same occurrence physically impossible (see cron.js).
+    if (!descTrans.ScheduledPaymentId) {
+      await qi.addColumn('Transactions', 'ScheduledPaymentId', {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      });
+      console.log('Migration: added Transactions.ScheduledPaymentId column');
+    }
+    // Existing rows have NULL ScheduledPaymentId and MySQL allows multiple NULLs
+    // in a unique index, so creating it never fails on historical data; only
+    // future scheduled inserts (which set a non-null id) are constrained.
+    try {
+      await sequelize.query(
+        'ALTER TABLE `Transactions` ADD UNIQUE INDEX `uniq_scheduled_occurrence` (`ScheduledPaymentId`, `date`)',
+      );
+      console.log(
+        'Migration: added unique index uniq_scheduled_occurrence on Transactions',
+      );
+    } catch (idxErr) {
+      // Index already exists -> ignore. Anything else -> warn (non-fatal).
+      if (
+        !idxErr.message?.includes('Duplicate key name') &&
+        idxErr.original?.code !== 'ER_DUP_KEYNAME'
+      ) {
+        console.warn(
+          'Could not add uniq_scheduled_occurrence index:',
+          idxErr.message,
+        );
+      }
     }
 
     // Expand Transactions.paymentMethod ENUM to include 'account'
@@ -32,89 +68,157 @@ export const connectDB = async () => {
     // always update an existing ENUM safely on MySQL.
     try {
       await sequelize.query(
-        "ALTER TABLE `Transactions` MODIFY COLUMN `paymentMethod` ENUM('cash','card','account') NOT NULL"
+        "ALTER TABLE `Transactions` MODIFY COLUMN `paymentMethod` ENUM('cash','card','account') NOT NULL",
       );
-      console.log('Transactions.paymentMethod ENUM expanded to include account');
+      console.log(
+        'Transactions.paymentMethod ENUM expanded to include account',
+      );
     } catch (enumErr) {
       // Already includes 'account' or another harmless error — safe to ignore
-      if (!enumErr.message?.includes("can't change column") &&
-          !enumErr.message?.includes('already')) {
-        console.warn('Could not expand Transactions paymentMethod ENUM:', enumErr.message);
+      if (
+        !enumErr.message?.includes("can't change column") &&
+        !enumErr.message?.includes('already')
+      ) {
+        console.warn(
+          'Could not expand Transactions paymentMethod ENUM:',
+          enumErr.message,
+        );
       }
     }
 
     // Data migration: fix legacy rows that have an AccountId but were saved
     // as paymentMethod='cash' due to the old workaround.
     const [migrationResult] = await sequelize.query(
-      "UPDATE `Transactions` SET `paymentMethod` = 'account' WHERE `AccountId` IS NOT NULL AND `paymentMethod` = 'cash'"
+      "UPDATE `Transactions` SET `paymentMethod` = 'account' WHERE `AccountId` IS NOT NULL AND `paymentMethod` = 'cash'",
     );
     if (migrationResult.affectedRows > 0) {
-      console.log(`Migration: updated ${migrationResult.affectedRows} transaction(s) from paymentMethod='cash' → 'account' (had AccountId)`);
+      console.log(
+        `Migration: updated ${migrationResult.affectedRows} transaction(s) from paymentMethod='cash' → 'account' (had AccountId)`,
+      );
     }
 
-    const descSched = await qi.describeTable('ScheduledPayments').catch(() => ({}));
+    const descSched = await qi
+      .describeTable('ScheduledPayments')
+      .catch(() => ({}));
     if (!descSched.paymentMethod) {
-      await qi.addColumn('ScheduledPayments', 'paymentMethod', { type: DataTypes.ENUM('card', 'cash', 'account'), allowNull: true });
+      await qi.addColumn('ScheduledPayments', 'paymentMethod', {
+        type: DataTypes.ENUM('card', 'cash', 'account'),
+        allowNull: true,
+      });
     }
     if (!descSched.AccountId) {
-      await qi.addColumn('ScheduledPayments', 'AccountId', { type: DataTypes.INTEGER, allowNull: true });
+      await qi.addColumn('ScheduledPayments', 'AccountId', {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      });
     }
 
     // Add monthlyBudget to Categories if not present
     const descCats = await qi.describeTable('Categories').catch(() => ({}));
     if (!descCats.monthlyBudget) {
-      await qi.addColumn('Categories', 'monthlyBudget', { type: DataTypes.DECIMAL(10, 2), allowNull: true, defaultValue: null });
+      await qi.addColumn('Categories', 'monthlyBudget', {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        defaultValue: null,
+      });
       console.log('Migration: added Categories.monthlyBudget column');
     }
     // Add isExcludedFromTotals to Accounts (cuentas "no integrar" / aisladas)
     const descAccts = await qi.describeTable('Accounts').catch(() => ({}));
     if (!descAccts.isExcludedFromTotals) {
-      await qi.addColumn('Accounts', 'isExcludedFromTotals', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false });
+      await qi.addColumn('Accounts', 'isExcludedFromTotals', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
       console.log('Migration: added Accounts.isExcludedFromTotals column');
     }
 
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {
-      await qi.addColumn('Users', 'publicId', { type: DataTypes.UUID, allowNull: true, unique: true });
+      await qi.addColumn('Users', 'publicId', {
+        type: DataTypes.UUID,
+        allowNull: true,
+        unique: true,
+      });
     }
     if (!desc.lastLoginAt) {
-      await qi.addColumn('Users', 'lastLoginAt', { type: DataTypes.DATE, allowNull: true });
+      await qi.addColumn('Users', 'lastLoginAt', {
+        type: DataTypes.DATE,
+        allowNull: true,
+      });
     }
     if (!desc.isSuperAdmin) {
-      await qi.addColumn('Users', 'isSuperAdmin', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false });
+      await qi.addColumn('Users', 'isSuperAdmin', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
       console.log('Migration: added Users.isSuperAdmin column');
     }
     if (!desc.isActive) {
-      await qi.addColumn('Users', 'isActive', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true });
+      await qi.addColumn('Users', 'isActive', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      });
       console.log('Migration: added Users.isActive column');
     }
     if (!desc.isEmailVerified) {
-      await qi.addColumn('Users', 'isEmailVerified', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false });
+      await qi.addColumn('Users', 'isEmailVerified', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
       // Marcar usuarios existentes como verificados para no bloquearlos
-      await sequelize.query("UPDATE `Users` SET `isEmailVerified` = true");
-      console.log('Migration: added Users.isEmailVerified column and verified existing users');
+      await sequelize.query('UPDATE `Users` SET `isEmailVerified` = true');
+      console.log(
+        'Migration: added Users.isEmailVerified column and verified existing users',
+      );
     }
     if (!desc.verificationToken) {
-      await qi.addColumn('Users', 'verificationToken', { type: DataTypes.STRING, allowNull: true });
+      await qi.addColumn('Users', 'verificationToken', {
+        type: DataTypes.STRING,
+        allowNull: true,
+      });
     }
     if (!desc.resetPasswordToken) {
-      await qi.addColumn('Users', 'resetPasswordToken', { type: DataTypes.STRING, allowNull: true });
+      await qi.addColumn('Users', 'resetPasswordToken', {
+        type: DataTypes.STRING,
+        allowNull: true,
+      });
     }
     if (!desc.resetPasswordExpires) {
-      await qi.addColumn('Users', 'resetPasswordExpires', { type: DataTypes.DATE, allowNull: true });
+      await qi.addColumn('Users', 'resetPasswordExpires', {
+        type: DataTypes.DATE,
+        allowNull: true,
+      });
     }
     if (!desc.currency) {
-      await qi.addColumn('Users', 'currency', { type: DataTypes.STRING(10), allowNull: false, defaultValue: 'USD' });
+      await qi.addColumn('Users', 'currency', {
+        type: DataTypes.STRING(10),
+        allowNull: false,
+        defaultValue: 'USD',
+      });
       console.log('Migration: added Users.currency column');
     }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
-    const [rows] = await sequelize.query('SELECT id FROM `Users` WHERE `publicId` IS NULL');
+    const [rows] = await sequelize.query(
+      'SELECT id FROM `Users` WHERE `publicId` IS NULL',
+    );
     for (const r of rows) {
-      await sequelize.query('UPDATE `Users` SET `publicId` = :uuid WHERE `id` = :id', { replacements: { uuid: uuidv4(), id: r.id } });
+      await sequelize.query(
+        'UPDATE `Users` SET `publicId` = :uuid WHERE `id` = :id',
+        { replacements: { uuid: uuidv4(), id: r.id } },
+      );
     }
     const updatedDesc = await qi.describeTable('Users').catch(() => ({}));
     if (updatedDesc.publicId && updatedDesc.publicId.allowNull) {
-      await qi.changeColumn('Users', 'publicId', { type: DataTypes.UUID, allowNull: false, unique: true });
+      await qi.changeColumn('Users', 'publicId', {
+        type: DataTypes.UUID,
+        allowNull: false,
+        unique: true,
+      });
     }
     console.log('Database connected and synced');
   } catch (err) {
@@ -122,4 +226,5 @@ export const connectDB = async () => {
   }
 };
 
-connectDB();
+// NOTE: connectDB() is now invoked (awaited) from index.js so the
+// scheduled-payments startup catch-up runs only once the DB is ready.
