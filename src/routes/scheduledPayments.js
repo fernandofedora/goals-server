@@ -1,29 +1,62 @@
 import express from 'express';
 import { Op } from 'sequelize';
 import { authMiddleware } from '../middleware/auth.js';
-import { ScheduledPayment, Category, Card, Account, Transaction } from '../models/index.js';
+import {
+  ScheduledPayment,
+  Category,
+  Card,
+  Account,
+  Transaction,
+} from '../models/index.js';
 
 const router = express.Router();
 router.use(authMiddleware);
-
-
 
 // @route   POST api/scheduled-payments
 // @desc    Create a scheduled payment
 // @access  Private
 router.post('/', async (req, res) => {
-  const { name, type, amount, period, CardId, AccountId, paymentMethod, CategoryId, description, startDate, endDate, occurrences, specificDay } = req.body;
+  const {
+    name,
+    type,
+    amount,
+    period,
+    CardId,
+    AccountId,
+    paymentMethod,
+    CategoryId,
+    description,
+    startDate,
+    endDate,
+    occurrences,
+    specificDay,
+  } = req.body;
 
   try {
     // Simple validation
-    if (!name || !type || !amount || !period || !CategoryId || !startDate || !paymentMethod || !endDate) {
+    if (
+      !name ||
+      !type ||
+      !amount ||
+      !period ||
+      !CategoryId ||
+      !startDate ||
+      !paymentMethod ||
+      !endDate
+    ) {
       return res.status(400).json({ msg: 'Please enter all required fields' });
     }
     if (paymentMethod === 'card' && !CardId) {
-      return res.status(400).json({ msg: 'Credit card is required when payment method is card' });
+      return res
+        .status(400)
+        .json({ msg: 'Credit card is required when payment method is card' });
     }
     if (paymentMethod === 'account' && !AccountId) {
-      return res.status(400).json({ msg: 'Bank account is required when payment method is account' });
+      return res
+        .status(400)
+        .json({
+          msg: 'Bank account is required when payment method is account',
+        });
     }
 
     const newScheduledPayment = await ScheduledPayment.create({
@@ -58,7 +91,7 @@ router.get('/', async (req, res) => {
   try {
     const scheduledPayments = await ScheduledPayment.findAll({
       where: { UserId: req.userId },
-      include: [Category, Card, Account]
+      include: [Category, Card, Account],
     });
     res.json(scheduledPayments);
   } catch (err) {
@@ -71,18 +104,40 @@ router.get('/', async (req, res) => {
 // @desc    Update a scheduled payment
 // @access  Private
 router.put('/:id', async (req, res) => {
-  const { name, type, amount, period, CardId, AccountId, paymentMethod, CategoryId, description, startDate, endDate, occurrences, specificDay, status } = req.body;
+  const {
+    name,
+    type,
+    amount,
+    period,
+    CardId,
+    AccountId,
+    paymentMethod,
+    CategoryId,
+    description,
+    startDate,
+    endDate,
+    occurrences,
+    specificDay,
+    status,
+  } = req.body;
 
   try {
     let scheduledPayment = await ScheduledPayment.findByPk(req.params.id);
 
-    if (!scheduledPayment) return res.status(404).json({ msg: 'Scheduled payment not found' });
+    if (!scheduledPayment)
+      return res.status(404).json({ msg: 'Scheduled payment not found' });
 
     if (paymentMethod === 'card' && !CardId) {
-      return res.status(400).json({ msg: 'Credit card is required when payment method is card' });
+      return res
+        .status(400)
+        .json({ msg: 'Credit card is required when payment method is card' });
     }
     if (paymentMethod === 'account' && !AccountId) {
-      return res.status(400).json({ msg: 'Bank account is required when payment method is account' });
+      return res
+        .status(400)
+        .json({
+          msg: 'Bank account is required when payment method is account',
+        });
     }
 
     // Make sure user owns scheduled payment
@@ -90,16 +145,16 @@ router.put('/:id', async (req, res) => {
       return res.status(401).json({ msg: 'Not authorized' });
     }
 
-    let nextDueDate = scheduledPayment.nextDueDate; // this is 'YYYY-MM-DD' from DB
-    if (startDate) {
-      // Since Sequelize DATEONLY returns 'YYYY-MM-DD', we can just use lexicographical comparison
-      // or simple Date parsing to check if cron advanced it.
-      // If the currently saved nextDueDate is before or equal to the new startDate,
-      // it means the cron hasn't moved past the new start date yet, so we sync it.
-      // Also if we just changed the startDate, it's safer to sync it.
-      if (scheduledPayment.nextDueDate <= startDate || startDate !== scheduledPayment.startDate) {
-        nextDueDate = startDate;
-      }
+    // Re-anchor nextDueDate ONLY when the user actually changes startDate, and
+    // never move it backwards into the past: a past nextDueDate makes the cron
+    // re-materialize every elapsed period, producing duplicate transactions.
+    // Editing any other field leaves nextDueDate untouched (the cron owns it).
+    // DATEONLY values are 'YYYY-MM-DD' strings, so lexicographic comparison works.
+    let nextDueDate = scheduledPayment.nextDueDate;
+    if (startDate && startDate !== scheduledPayment.startDate) {
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      nextDueDate = startDate > todayStr ? startDate : todayStr;
     }
 
     await scheduledPayment.update({
@@ -134,7 +189,8 @@ router.delete('/:id', async (req, res) => {
   try {
     let scheduledPayment = await ScheduledPayment.findByPk(req.params.id);
 
-    if (!scheduledPayment) return res.status(404).json({ msg: 'Scheduled payment not found' });
+    if (!scheduledPayment)
+      return res.status(404).json({ msg: 'Scheduled payment not found' });
 
     // Make sure user owns scheduled payment
     if (scheduledPayment.UserId !== req.userId) {
