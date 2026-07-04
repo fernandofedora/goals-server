@@ -23,12 +23,14 @@
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.15.2",
     "node-cron": "^4.2.1",
-    "nodemailer": "^8.0.5",
+    "nodemailer": "^9.0.3",
     "sequelize": "^6.37.7",
-    "uuid": "^14.0.0",
-    "xlsx": "^0.18.5"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
+  },
+  "overrides": {
+    "uuid": "^14.0.0"
   }
 }
