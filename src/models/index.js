@@ -32,6 +32,11 @@ export const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: 'USD',
   },
+  language: {
+    type: DataTypes.STRING(5),
+    allowNull: false,
+    defaultValue: 'en',
+  },
 });
 
 export const Category = sequelize.define('Category', {
