@@ -202,6 +202,14 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Users.currency column');
     }
+    if (!desc.language) {
+      await qi.addColumn('Users', 'language', {
+        type: DataTypes.STRING(5),
+        allowNull: false,
+        defaultValue: 'en',
+      });
+      console.log('Migration: added Users.language column');
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query(
       'SELECT id FROM `Users` WHERE `publicId` IS NULL',
