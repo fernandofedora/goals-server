@@ -118,7 +118,12 @@ router.get('/plans/:id/summary', async (req, res) => {
   let totalAuto = 0;
   let autoTransactions = [];
   if (plan.linkedCategoryId) {
-    const where = { UserId: req.userId, CategoryId: plan.linkedCategoryId, type: 'expense', ...(range.date ? { date: range.date } : {}) };
+    // Match the transaction type to the linked category's own type: an income
+    // category feeds a plan through income transactions, an expense category
+    // through expense ones. Hard-coding 'expense' hid all income-linked plans.
+    const linkedCategory = await Category.findOne({ where: { id: plan.linkedCategoryId, UserId: req.userId } });
+    const where = { UserId: req.userId, CategoryId: plan.linkedCategoryId, ...(range.date ? { date: range.date } : {}) };
+    if (linkedCategory) where.type = linkedCategory.type;
     autoTransactions = await Transaction.findAll({ where, order: [['date','DESC']] });
     totalAuto = autoTransactions.reduce((s, t) => s + Number(t.amount), 0);
   }
