@@ -39,6 +39,14 @@ FRONTEND_URL=http://localhost:5173
 
 # Super-admin bootstrap (optional)
 BOOTSTRAP_SECRET=a_one_off_secret
+
+# Investments module (experimental)
+FINNHUB_API_KEY=your_finnhub_key
+# Optional, defaults shown
+MARKET_DATA_PROVIDER=finnhub
+MARKET_ALLOWED_EXCHANGES=US
+QUOTE_TTL_SECONDS=60
+FX_TTL_HOURS=12
 ```
 
 Notes:
@@ -46,6 +54,7 @@ Notes:
 - `SECRET_KEY` is required to sign and verify JWTs.
 - The `EMAIL_*` variables and `FRONTEND_URL` are required by the email-verification and password-reset flows (`src/utils/mail.js`). Without them registration still succeeds, but sending the verification email throws and is only logged.
 - `BOOTSTRAP_SECRET` protects `POST /auth/bootstrap`, which promotes an existing user to super admin.
+- `FINNHUB_API_KEY` enables the investments module (`/api/investments`): stock/ETF search runs against a local symbol catalog (`MarketSymbol`) synced from Finnhub on first boot and daily at 05:30, and quotes are cached for `QUOTE_TTL_SECONDS`. FX rates come from the keyless open.er-api.com endpoint. Without the key the server still starts, but investment search and quotes are disabled.
 
 ## Database
 Initialize the schema with the included SQL script:

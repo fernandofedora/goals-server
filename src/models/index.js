@@ -147,6 +147,103 @@ export const ScheduledPayment = sequelize.define('ScheduledPayment', {
   AccountId: { type: DataTypes.INTEGER, allowNull: true },
 });
 
+// --- Investments module (experimental, independent from Transactions) ---
+
+// A stock/ETF the user tracks. One row per user + provider symbol: the same
+// ticker can exist on several exchanges (e.g. SAP), so providerSymbol + exchange
+// identify the asset, never the bare ticker.
+export const InvestmentHolding = sequelize.define(
+  'InvestmentHolding',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    // Declared explicitly (not only via the association) so it exists when
+    // sync() creates the unique index below.
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    symbol: { type: DataTypes.STRING(20), allowNull: false },
+    providerSymbol: { type: DataTypes.STRING(40), allowNull: false },
+    exchange: { type: DataTypes.STRING(30), allowNull: true },
+    name: { type: DataTypes.STRING, allowNull: false },
+    assetType: {
+      type: DataTypes.ENUM('stock', 'etf', 'other'),
+      allowNull: false,
+      defaultValue: 'other',
+    },
+    quoteCurrency: { type: DataTypes.STRING(10), allowNull: false },
+    status: {
+      type: DataTypes.ENUM('active', 'archived'),
+      allowNull: false,
+      defaultValue: 'active',
+    },
+  },
+  {
+    indexes: [
+      {
+        unique: true,
+        fields: ['UserId', 'providerSymbol'],
+        name: 'uniq_holding_user_symbol',
+      },
+    ],
+  },
+);
+
+// One purchase (lot). Amounts are stored in the asset's quote currency and in
+// the user's currency at the FX rate of the day it was recorded, so P/L in the
+// user's currency includes both price and exchange-rate effects.
+export const InvestmentPurchase = sequelize.define('InvestmentPurchase', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  date: { type: DataTypes.DATEONLY, allowNull: false },
+  shares: { type: DataTypes.DECIMAL(18, 8), allowNull: false },
+  pricePerShare: { type: DataTypes.DECIMAL(18, 6), allowNull: false },
+  amountQuote: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+  userCurrency: { type: DataTypes.STRING(10), allowNull: false },
+  // 1 unit of quote currency = fxRate units of userCurrency
+  fxRate: { type: DataTypes.DECIMAL(18, 8), allowNull: false },
+  amountUser: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+  note: { type: DataTypes.STRING, allowNull: true },
+});
+
+// Symbol catalog for local search, synced once a day from the provider.
+export const MarketSymbol = sequelize.define(
+  'MarketSymbol',
+  {
+    providerSymbol: { type: DataTypes.STRING(40), primaryKey: true },
+    provider: { type: DataTypes.STRING(20), allowNull: false },
+    symbol: { type: DataTypes.STRING(20), allowNull: false },
+    name: { type: DataTypes.STRING, allowNull: false },
+    type: { type: DataTypes.STRING(30), allowNull: true },
+    mic: { type: DataTypes.STRING(10), allowNull: true },
+    currency: { type: DataTypes.STRING(10), allowNull: true },
+    figi: { type: DataTypes.STRING(20), allowNull: true },
+  },
+  {
+    indexes: [
+      { fields: ['symbol'], name: 'idx_market_symbol_symbol' },
+      { fields: ['name'], name: 'idx_market_symbol_name' },
+    ],
+  },
+);
+
+// Shared quote cache (all users), refreshed at most every QUOTE_TTL_SECONDS.
+export const MarketQuote = sequelize.define('MarketQuote', {
+  providerSymbol: { type: DataTypes.STRING(40), primaryKey: true },
+  price: { type: DataTypes.DECIMAL(18, 6), allowNull: false },
+  previousClose: { type: DataTypes.DECIMAL(18, 6), allowNull: true },
+  change: { type: DataTypes.DECIMAL(18, 6), allowNull: true },
+  changePercent: { type: DataTypes.DECIMAL(9, 4), allowNull: true },
+  currency: { type: DataTypes.STRING(10), allowNull: true },
+  // When the provider says the price is from (not when we fetched it)
+  quotedAt: { type: DataTypes.DATE, allowNull: true },
+  fetchedAt: { type: DataTypes.DATE, allowNull: false },
+});
+
+// FX rate cache, base USD: 1 USD = ratePerUsd units of currency.
+export const FxRate = sequelize.define('FxRate', {
+  currency: { type: DataTypes.STRING(10), primaryKey: true },
+  ratePerUsd: { type: DataTypes.DECIMAL(18, 8), allowNull: false },
+  sourceUpdatedAt: { type: DataTypes.DATE, allowNull: true },
+  fetchedAt: { type: DataTypes.DATE, allowNull: false },
+});
+
 // Associations
 User.hasMany(Category);
 Category.belongsTo(User);
@@ -189,3 +286,8 @@ Account.hasMany(ScheduledPayment);
 // deletable even after their ScheduledPayment is removed.
 ScheduledPayment.hasMany(Transaction, { constraints: false });
 Transaction.belongsTo(ScheduledPayment, { constraints: false });
+
+User.hasMany(InvestmentHolding);
+InvestmentHolding.belongsTo(User);
+InvestmentHolding.hasMany(InvestmentPurchase, { onDelete: 'CASCADE' });
+InvestmentPurchase.belongsTo(InvestmentHolding);
