@@ -210,6 +210,14 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Users.language column');
     }
+    if (!desc.canAccessInvestments) {
+      await qi.addColumn('Users', 'canAccessInvestments', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
+      console.log('Migration: added Users.canAccessInvestments column');
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query(
       'SELECT id FROM `Users` WHERE `publicId` IS NULL',

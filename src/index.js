@@ -13,7 +13,9 @@ import accountsRoutes from './routes/accounts.js';
 import userRoutes from './routes/user.js';
 import scheduledPaymentsRoutes from './routes/scheduledPayments.js';
 import adminRoutes from './routes/admin.js';
+import investmentsRoutes from './routes/investments.js';
 import { processScheduledPayments } from './cron.js';
+import { ensureCatalog } from './services/marketData/index.js';
 
 dotenv.config();
 const app = express();
@@ -32,6 +34,7 @@ app.use('/api/accounts', accountsRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/scheduled-payments', scheduledPaymentsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/investments', investmentsRoutes);
 
 const PORT = process.env.PORT || 4000;
 
@@ -50,5 +53,16 @@ app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
     await processScheduledPayments();
   } catch (err) {
     console.error('Startup initialization error:', err);
+  }
+  // Investments: first boot on a fresh DB has no symbol catalog yet. Runs after
+  // the scheduled payments catch-up and never blocks or fails startup.
+  if (process.env.FINNHUB_API_KEY) {
+    try {
+      await ensureCatalog();
+    } catch (err) {
+      console.error('Market catalog init failed:', err.message);
+    }
+  } else {
+    console.warn('FINNHUB_API_KEY not set: investments search/quotes disabled');
   }
 })();

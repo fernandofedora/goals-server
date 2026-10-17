@@ -2,6 +2,8 @@ import cron from 'node-cron';
 import { Op } from 'sequelize';
 import { sequelize } from './config/db.js';
 import { ScheduledPayment, Transaction } from './models/index.js';
+import { syncCatalog } from './services/marketData/index.js';
+import { getRates } from './services/fx.js';
 
 // Safety cap: never materialize more than this many occurrences for a single
 // payment in one catch-up pass, to guard against an unbounded loop on bad data.
@@ -202,3 +204,22 @@ export const processScheduledPayments = async () => {
 // index.js *after* connectDB() resolves (it used to run here on module import,
 // before the DB was ready -- a race on cold/managed databases).
 cron.schedule('0 0 * * *', processScheduledPayments);
+
+// Investments module: refresh the symbol catalog and FX rates once a day. Each
+// step is independent so one failing provider doesn't block the other.
+export const refreshMarketData = async () => {
+  if (process.env.FINNHUB_API_KEY) {
+    try {
+      await syncCatalog();
+    } catch (err) {
+      console.error('Market catalog sync failed:', err.message);
+    }
+  }
+  try {
+    await getRates({ force: true });
+  } catch (err) {
+    console.error('FX refresh failed:', err.message);
+  }
+};
+
+cron.schedule('30 5 * * *', refreshMarketData);
