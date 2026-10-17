@@ -17,6 +17,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       createdAt: user.createdAt,
       lastLoginAt: user.lastLoginAt,
       isSuperAdmin: user.isSuperAdmin,
+      canAccessInvestments: user.canAccessInvestments,
       currency: user.currency || 'USD',
       language: user.language || 'en',
     });

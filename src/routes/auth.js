@@ -67,7 +67,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ id: user.id, isSuperAdmin: user.isSuperAdmin }, process.env.SECRET_KEY, { expiresIn: '7d' });
     const now = new Date();
     await user.update({ lastLoginAt: now });
-    res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email, createdAt: user.createdAt, lastLoginAt: now, isSuperAdmin: user.isSuperAdmin } });
+    res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email, createdAt: user.createdAt, lastLoginAt: now, isSuperAdmin: user.isSuperAdmin, canAccessInvestments: user.canAccessInvestments } });
   } catch (e) { res.status(500).json({ message: 'Error del servidor' }); }
 });
 

@@ -5,7 +5,8 @@ import { sequelize } from '../config/db.js';
 import { authMiddleware, superAdminMiddleware } from '../middleware/auth.js';
 import {
   User, Category, Transaction, Card, Budget,
-  SavingsPlan, SavingsContribution, Account, ScheduledPayment
+  SavingsPlan, SavingsContribution, Account, ScheduledPayment,
+  InvestmentHolding, InvestmentPurchase
 } from '../models/index.js';
 
 const router = express.Router();
@@ -36,7 +37,7 @@ router.get('/users', async (req, res) => {
 
     const { count, rows } = await User.findAndCountAll({
       where,
-      attributes: ['id', 'publicId', 'name', 'email', 'isActive', 'isSuperAdmin', 'lastLoginAt', 'createdAt'],
+      attributes: ['id', 'publicId', 'name', 'email', 'isActive', 'isSuperAdmin', 'canAccessInvestments', 'lastLoginAt', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit: parseInt(limit),
       offset
@@ -59,7 +60,7 @@ router.get('/users', async (req, res) => {
 router.get('/users/:id', async (req, res) => {
   try {
     const user = await User.findByPk(req.params.id, {
-      attributes: ['id', 'publicId', 'name', 'email', 'isActive', 'isSuperAdmin', 'lastLoginAt', 'createdAt']
+      attributes: ['id', 'publicId', 'name', 'email', 'isActive', 'isSuperAdmin', 'canAccessInvestments', 'lastLoginAt', 'createdAt']
     });
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user);
@@ -165,6 +166,26 @@ router.patch('/users/:id/promote', async (req, res) => {
   }
 });
 
+// ─── PATCH /api/admin/users/:id/investments-access ───────────────────────────
+// Grant or revoke access to the investments module (closed beta). Super admins
+// always have access, so the flag only matters for regular users. Finnhub's free
+// plan is personal use only: grant it to the key owner's own account until
+// Finnhub authorizes wider use (see plan/investments-terms-review.md).
+router.patch('/users/:id/investments-access', async (req, res) => {
+  try {
+    const { canAccessInvestments } = req.body;
+    if (typeof canAccessInvestments !== 'boolean') return res.status(400).json({ message: 'canAccessInvestments must be boolean' });
+
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    await user.update({ canAccessInvestments });
+    res.json({ id: user.id, canAccessInvestments: user.canAccessInvestments });
+  } catch (e) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // ─── DELETE /api/admin/users/:id ─────────────────────────────────────────────
 // Permanently delete a user and ALL their data (cascade)
 router.delete('/users/:id', async (req, res) => {
@@ -201,6 +222,13 @@ router.delete('/users/:id', async (req, res) => {
 
       // Cards
       await Card.destroy({ where: { UserId: userId }, transaction: t });
+
+      // Investments (purchases → holdings)
+      const holdings = await InvestmentHolding.findAll({ where: { UserId: userId }, attributes: ['id'], transaction: t });
+      if (holdings.length) {
+        await InvestmentPurchase.destroy({ where: { InvestmentHoldingId: holdings.map((h) => h.id) }, transaction: t });
+        await InvestmentHolding.destroy({ where: { UserId: userId }, transaction: t });
+      }
 
       // Accounts
       await Account.destroy({ where: { UserId: userId }, transaction: t });
