@@ -1,5 +1,8 @@
 import express from 'express';
-import { authMiddleware } from '../middleware/auth.js';
+import {
+  authMiddleware,
+  investmentsAccessMiddleware,
+} from '../middleware/auth.js';
 import { sequelize } from '../config/db.js';
 import {
   InvestmentHolding,
@@ -19,7 +22,8 @@ import { getRate, getRatesDate } from '../services/fx.js';
 // Experimental investments module. Independent by design: it never touches
 // Transactions, Accounts, Cards, Categories or stats.
 const router = express.Router();
-router.use(authMiddleware);
+// Closed beta: only super admins and users they granted access (see auth.js).
+router.use(authMiddleware, investmentsAccessMiddleware);
 
 const round = (n, d) =>
   n == null || !Number.isFinite(n) ? null : Number(n.toFixed(d));

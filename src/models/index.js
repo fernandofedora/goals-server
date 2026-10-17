@@ -37,6 +37,13 @@ export const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: 'en',
   },
+  // Closed beta of the investments module: Finnhub's free plan is personal use
+  // only, so access is granted per user by a super admin (who always has it).
+  canAccessInvestments: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 export const Category = sequelize.define('Category', {

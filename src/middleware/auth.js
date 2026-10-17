@@ -10,7 +10,31 @@ export const authMiddleware = (req, res, next) => {
     req.userId = payload.id;
     req.isSuperAdmin = payload.isSuperAdmin || false;
     next();
-  } catch (e) { return res.status(401).json({ message: 'Invalid token' }); }
+  } catch (e) {
+    return res.status(401).json({ message: 'Invalid token' });
+  }
+};
+
+// Investments module (closed beta): super admins, or users a super admin granted
+// access to. Re-read from the DB so a revoked grant takes effect immediately.
+export const investmentsAccessMiddleware = async (req, res, next) => {
+  try {
+    const user = await User.findByPk(req.userId, {
+      attributes: ['isActive', 'isSuperAdmin', 'canAccessInvestments'],
+    });
+    if (
+      !user ||
+      !user.isActive ||
+      !(user.isSuperAdmin || user.canAccessInvestments)
+    ) {
+      return res
+        .status(403)
+        .json({ message: 'No tienes acceso al módulo de inversiones' });
+    }
+    next();
+  } catch (e) {
+    return res.status(500).json({ message: 'Server error' });
+  }
 };
 
 // Double-check against DB – never trust only the token for privileged operations
