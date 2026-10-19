@@ -23,7 +23,7 @@
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.15.2",
     "node-cron": "^4.2.1",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.1.7",
     "sequelize": "^6.37.7",
     "uuid": "^14.0.0"
   },
