@@ -150,15 +150,17 @@ describe('processScheduledPayments', () => {
     expect([accountTx.CardId, accountTx.AccountId]).toEqual([null, account.id]);
   });
 
-  // Pins current behavior: after snapping to Feb 28 the payment stays on the 28th.
-  it('keeps the snapped day in later months', async () => {
+  it('goes back to the original day after a short month', async () => {
     const { user } = await createUser();
-    const p = await schedule(user, { nextDueDate: '2026-01-31' });
+    const p = await schedule(user, {
+      startDate: '2026-01-31',
+      nextDueDate: '2026-01-31',
+    });
 
     await processScheduledPayments();
     await p.reload();
 
     expect(await datesOf(p)).toEqual(['2026-01-31', '2026-02-28']);
-    expect(p.nextDueDate).toBe('2026-03-28');
+    expect(p.nextDueDate).toBe('2026-03-31');
   });
 });

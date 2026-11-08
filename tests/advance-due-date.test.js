@@ -24,4 +24,33 @@ describe('advanceDueDate', () => {
   ])('snaps %s + %s to the last valid day (%s)', (from, period, expected) => {
     expect(advanceDueDate(from, period)).toBe(expected);
   });
+
+  it.each([
+    ['2026-02-28', 'monthly', '2026-01-31', '2026-03-31'],
+    ['2026-03-31', 'monthly', '2026-01-31', '2026-04-30'],
+    ['2026-04-30', 'monthly', '2026-01-31', '2026-05-31'],
+    ['2026-02-28', 'quarterly', '2025-11-30', '2026-05-30'],
+    ['2029-02-28', 'yearly', '2028-02-29', '2030-02-28'],
+    ['2031-02-28', 'yearly', '2028-02-29', '2032-02-29'],
+  ])('%s + %s returns to the day of %s', (from, period, start, expected) => {
+    expect(advanceDueDate(from, period, start)).toBe(expected);
+  });
+
+  it('repairs a payment that had already drifted to an earlier day', () => {
+    expect(advanceDueDate('2026-03-28', 'monthly', '2026-01-31')).toBe(
+      '2026-04-30',
+    );
+  });
+
+  it('never moves a payment earlier than its current day', () => {
+    expect(advanceDueDate('2026-03-15', 'monthly', '2026-01-05')).toBe(
+      '2026-04-15',
+    );
+  });
+
+  it('ignores the start date for fixed-length periods', () => {
+    expect(advanceDueDate('2026-03-10', 'weekly', '2026-01-31')).toBe(
+      '2026-03-17',
+    );
+  });
 });
