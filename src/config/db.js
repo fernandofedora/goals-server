@@ -133,6 +133,25 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Accounts.isExcludedFromTotals column');
     }
+    // Add isHidden to Accounts and Cards (ocultar en el módulo de Cuentas;
+    // antes solo se guardaba en localStorage y reaparecía en otros dispositivos)
+    if (!descAccts.isHidden) {
+      await qi.addColumn('Accounts', 'isHidden', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
+      console.log('Migration: added Accounts.isHidden column');
+    }
+    const descCardCols = await qi.describeTable('Cards').catch(() => ({}));
+    if (!descCardCols.isHidden) {
+      await qi.addColumn('Cards', 'isHidden', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
+      console.log('Migration: added Cards.isHidden column');
+    }
 
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {
