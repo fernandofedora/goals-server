@@ -107,6 +107,16 @@ router.put('/:id', async (req, res) => {
   res.json(item);
 });
 
+// PATCH hide/show an account in the Accounts module
+router.patch('/:id/visibility', async (req, res) => {
+  const { isHidden } = req.body;
+  if (typeof isHidden !== 'boolean') return res.status(400).json({ message: 'isHidden must be boolean' });
+  const item = await Account.findOne({ where: { id: req.params.id, UserId: req.userId } });
+  if (!item) return res.status(404).json({ message: 'Not found' });
+  await item.update({ isHidden });
+  res.json(item);
+});
+
 // DELETE an account
 router.delete('/:id', async (req, res) => {
   const item = await Account.findOne({

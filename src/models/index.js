@@ -63,6 +63,8 @@ export const Card = sequelize.define('Card', {
   name: { type: DataTypes.STRING, allowNull: false },
   color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#0ea5e9' },
   last4: { type: DataTypes.STRING, allowNull: false },
+  // Hidden from the Accounts module (data and transactions are kept)
+  isHidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 });
 
 export const Transaction = sequelize.define('Transaction', {
@@ -122,6 +124,8 @@ export const Account = sequelize.define('Account', {
     allowNull: false,
     defaultValue: false,
   },
+  // Hidden from the Accounts module (data and transactions are kept)
+  isHidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 });
 
 export const ScheduledPayment = sequelize.define('ScheduledPayment', {
