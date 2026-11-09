@@ -7,18 +7,25 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
-  const { cardId, accountId, page, limit } = req.query;
+  const { cardId, accountId, page, limit, q } = req.query;
   const where = { UserId: req.userId };
   if (cardId) where.CardId = cardId;
   if (accountId) where.AccountId = accountId;
+  if (q) where.description = { [Op.like]: `%${q}%` };
 
   // General history (no specific card/account requested): hide transactions of
   // isolated ("no integrar") accounts, but keep account-less ones (cash/card).
   if (!accountId && !cardId) {
-    const isolated = await Account.findAll({ where: { UserId: req.userId, isExcludedFromTotals: true }, attributes: ['id'] });
-    const isolatedIds = isolated.map(a => a.id);
+    const isolated = await Account.findAll({
+      where: { UserId: req.userId, isExcludedFromTotals: true },
+      attributes: ['id'],
+    });
+    const isolatedIds = isolated.map((a) => a.id);
     if (isolatedIds.length > 0) {
-      where[Op.or] = [{ AccountId: null }, { AccountId: { [Op.notIn]: isolatedIds } }];
+      where[Op.or] = [
+        { AccountId: null },
+        { AccountId: { [Op.notIn]: isolatedIds } },
+      ];
     }
   }
 
@@ -28,9 +35,9 @@ router.get('/', async (req, res) => {
     include: [
       { model: Category, attributes: { exclude: ['UserId'] } },
       { model: Card, attributes: { exclude: ['UserId'] } },
-      { model: Account, attributes: { exclude: ['UserId'] } }
+      { model: Account, attributes: { exclude: ['UserId'] } },
     ],
-    order: [['date', 'DESC']]
+    order: [['date', 'DESC']],
   };
 
   const hasPagination = page !== undefined || limit !== undefined;
@@ -42,7 +49,7 @@ router.get('/', async (req, res) => {
     const { rows, count } = await Transaction.findAndCountAll({
       ...commonOptions,
       offset,
-      limit: limitInt
+      limit: limitInt,
     });
     res.json({ items: rows, page: pageInt, limit: limitInt, total: count });
     return;
@@ -53,37 +60,78 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { type, description, categoryId, amount, date, paymentMethod, cardId, accountId } = req.body;
-  const item = await Transaction.create({ type, description, amount, date, paymentMethod, UserId: req.userId, CategoryId: categoryId || null, CardId: cardId || null, AccountId: accountId || null });
+  const {
+    type,
+    description,
+    categoryId,
+    amount,
+    date,
+    paymentMethod,
+    cardId,
+    accountId,
+  } = req.body;
+  const item = await Transaction.create({
+    type,
+    description,
+    amount,
+    date,
+    paymentMethod,
+    UserId: req.userId,
+    CategoryId: categoryId || null,
+    CardId: cardId || null,
+    AccountId: accountId || null,
+  });
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
     include: [
       { model: Category, attributes: { exclude: ['UserId'] } },
       { model: Card, attributes: { exclude: ['UserId'] } },
-      { model: Account, attributes: { exclude: ['UserId'] } }
-    ]
+      { model: Account, attributes: { exclude: ['UserId'] } },
+    ],
   });
   res.json(full);
 });
 
 router.put('/:id', async (req, res) => {
-  const item = await Transaction.findOne({ where: { id: req.params.id, UserId: req.userId } });
+  const item = await Transaction.findOne({
+    where: { id: req.params.id, UserId: req.userId },
+  });
   if (!item) return res.status(404).json({ message: 'Not found' });
-  const { type, description, categoryId, amount, date, paymentMethod, cardId, accountId } = req.body;
-  await item.update({ type, description, amount, date, paymentMethod, CategoryId: categoryId || null, CardId: cardId || null, AccountId: accountId || null });
+  const {
+    type,
+    description,
+    categoryId,
+    amount,
+    date,
+    paymentMethod,
+    cardId,
+    accountId,
+  } = req.body;
+  await item.update({
+    type,
+    description,
+    amount,
+    date,
+    paymentMethod,
+    CategoryId: categoryId || null,
+    CardId: cardId || null,
+    AccountId: accountId || null,
+  });
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
     include: [
       { model: Category, attributes: { exclude: ['UserId'] } },
       { model: Card, attributes: { exclude: ['UserId'] } },
-      { model: Account, attributes: { exclude: ['UserId'] } }
-    ]
+      { model: Account, attributes: { exclude: ['UserId'] } },
+    ],
   });
   res.json(full);
 });
 
 router.delete('/:id', async (req, res) => {
-  const item = await Transaction.findOne({ where: { id: req.params.id, UserId: req.userId } });
+  const item = await Transaction.findOne({
+    where: { id: req.params.id, UserId: req.userId },
+  });
   if (!item) return res.status(404).json({ message: 'Not found' });
   await item.destroy();
   res.json({ success: true });
