@@ -145,22 +145,4 @@ router.post('/reset-password', async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Error del servidor' }); }
 });
 
-// ─── POST /api/auth/bootstrap ───────────────────────────────────────────────
-// One-time route to promote an existing user to Super Admin.
-// Requires the BOOTSTRAP_SECRET env variable as the Authorization header value.
-router.post('/bootstrap', async (req, res) => {
-  try {
-    const secret = req.headers.authorization;
-    if (!secret || secret !== process.env.BOOTSTRAP_SECRET) {
-      return res.status(403).json({ message: 'Invalid bootstrap secret' });
-    }
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ message: 'Email required' });
-    const user = await User.findOne({ where: { email } });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    await user.update({ isSuperAdmin: true, isActive: true });
-    res.json({ success: true, message: `${user.name} (${user.email}) is now a Super Admin.` });
-  } catch (e) { res.status(500).json({ message: 'Server error' }); }
-});
-
 export default router;
