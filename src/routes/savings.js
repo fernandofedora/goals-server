@@ -1,6 +1,7 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { SavingsPlan, SavingsContribution, Category, Transaction } from '../models/index.js';
+import { withChildIds } from '../utils/categoryTree.js';
 import { Op } from 'sequelize';
 
 const router = express.Router();
@@ -122,7 +123,7 @@ router.get('/plans/:id/summary', async (req, res) => {
     // category feeds a plan through income transactions, an expense category
     // through expense ones. Hard-coding 'expense' hid all income-linked plans.
     const linkedCategory = await Category.findOne({ where: { id: plan.linkedCategoryId, UserId: req.userId } });
-    const where = { UserId: req.userId, CategoryId: plan.linkedCategoryId, ...(range.date ? { date: range.date } : {}) };
+    const where = { UserId: req.userId, CategoryId: await withChildIds(req.userId, plan.linkedCategoryId), ...(range.date ? { date: range.date } : {}) };
     if (linkedCategory) where.type = linkedCategory.type;
     autoTransactions = await Transaction.findAll({ where, order: [['date','DESC']] });
     totalAuto = autoTransactions.reduce((s, t) => s + Number(t.amount), 0);

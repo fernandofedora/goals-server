@@ -1,6 +1,7 @@
 import express from 'express';
 import { Op, col, fn } from 'sequelize';
 import { authMiddleware } from '../middleware/auth.js';
+import { withChildIds } from '../utils/categoryTree.js';
 import { Transaction, Category, Card, Account } from '../models/index.js';
 
 const router = express.Router();
@@ -24,7 +25,10 @@ function buildFilters(query, userId) {
   const where = { UserId: userId };
   if (cardId) where.CardId = cardId;
   if (accountId) where.AccountId = accountId;
-  if (categoryId) where.CategoryId = categoryId;
+  if (categoryId) {
+    if (!/^\d+$/.test(String(categoryId))) return { error: 'categoryId' };
+    where.CategoryId = categoryId;
+  }
 
   if (type) {
     if (!['expense', 'income'].includes(type)) return { error: 'type' };
@@ -38,7 +42,9 @@ function buildFilters(query, userId) {
   }
   // Escaped so a search for "50%" means that text, not a wildcard.
   if (q) {
-    where.description = { [Op.like]: `%${String(q).replace(/[\\%_]/g, '\\$&')}%` };
+    where.description = {
+      [Op.like]: `%${String(q).replace(/[\\%_]/g, '\\$&')}%`,
+    };
   }
 
   if ((from && !DATE_RE.test(from)) || (to && !DATE_RE.test(to))) {
@@ -108,6 +114,10 @@ router.get('/', async (req, res) => {
   const { cardId, accountId, page, limit } = req.query;
   const { where, error } = buildFilters(req.query, req.userId);
   if (error) return res.status(400).json({ message: `Invalid ${error}` });
+  // A parent category also lists the transactions of its subcategories.
+  if (req.query.categoryId) {
+    where.CategoryId = await withChildIds(req.userId, req.query.categoryId);
+  }
 
   // General history (no specific card/account requested): hide transactions of
   // isolated ("no integrar") accounts, but keep account-less ones (cash/card).

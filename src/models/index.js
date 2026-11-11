@@ -56,6 +56,8 @@ export const Category = sequelize.define('Category', {
     allowNull: true,
     defaultValue: null,
   },
+  // Subcategories: one level deep, see routes/categories.js.
+  parentId: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
 });
 
 export const Card = sequelize.define('Card', {
@@ -263,6 +265,8 @@ Card.belongsTo(User);
 User.hasMany(Transaction);
 Transaction.belongsTo(User);
 Category.hasMany(Transaction);
+Category.belongsTo(Category, { as: 'parent', foreignKey: 'parentId' });
+Category.hasMany(Category, { as: 'children', foreignKey: 'parentId' });
 Transaction.belongsTo(Category);
 Card.hasMany(Transaction);
 Transaction.belongsTo(Card);

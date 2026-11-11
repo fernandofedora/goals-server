@@ -2,6 +2,7 @@ import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { Transaction, Category, Card, Budget, Account } from '../models/index.js';
 import ExcelJS from 'exceljs';
+import { groupByParent } from '../utils/categoryTree.js';
 import { Op } from 'sequelize'
 
 const router = express.Router();
@@ -60,16 +61,7 @@ router.get('/summary', async (req, res) => {
 
     // Categories (expenses only) — fetch all user categories to attach fixed monthlyBudget
     const allCategories = await Category.findAll({ where: { UserId: req.userId } });
-    const catBudgetMap = Object.fromEntries(allCategories.map(c => [c.name, c.monthlyBudget != null ? Number(c.monthlyBudget) : null]));
-
-    const categoryMap = {};
-    txs.filter(t => t.type === 'expense').forEach(t => {
-      const name = t.Category?.name || 'Uncategorized';
-      const color = t.Category?.color || '#3b82f6';
-      if (!categoryMap[name]) categoryMap[name] = { name, amount: 0, color, monthlyBudget: catBudgetMap[name] ?? null };
-      categoryMap[name].amount += Number(t.amount);
-    });
-    const categories = Object.values(categoryMap);
+    const categories = groupByParent(txs, allCategories, 'expense', '#3b82f6');
 
     // Income vs Expense timeseries (by day)
     const dayMap = {};
@@ -105,14 +97,7 @@ router.get('/summary', async (req, res) => {
     };
 
     // Income categories (income by category)
-    const incomeCategoryMap = {};
-    txs.filter(t => t.type === 'income').forEach(t => {
-      const name = t.Category?.name || 'Uncategorized';
-      const color = t.Category?.color || '#10b981';
-      if (!incomeCategoryMap[name]) incomeCategoryMap[name] = { name, amount: 0, color };
-      incomeCategoryMap[name].amount += Number(t.amount);
-    });
-    const incomeCategories = Object.values(incomeCategoryMap);
+    const incomeCategories = groupByParent(txs, allCategories, 'income', '#10b981');
 
     res.json({ totals, categories, incomeCategories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
   } catch (e) {
@@ -140,15 +125,22 @@ router.get('/categories-timeline', async (req, res) => {
     // Resolve which categories to render. Default: all of user's expense categories.
     const categoriesWhere = { UserId: userId };
     if (catFilter) categoriesWhere.id = catFilter;
-    else categoriesWhere.type = 'expense';
+    else Object.assign(categoriesWhere, { type: 'expense', parentId: null });
     const cats = await Category.findAll({ where: categoriesWhere });
     const resolvedIds = cats.map(c => c.id);
+    // A selected parent's line also carries its subcategories' spending.
+    const children = await Category.findAll({ where: { UserId: userId, parentId: resolvedIds } });
+    const seriesKeysFor = new Map(resolvedIds.map(id => [id, [`cat_${id}`]]));
+    for (const child of children) {
+      const keys = seriesKeysFor.get(child.id) || [];
+      seriesKeysFor.set(child.id, [...keys, `cat_${child.parentId}`]);
+    }
     if (resolvedIds.length === 0) {
       return res.json({ granularity: 'month', series: [], categories: [] });
     }
 
     // Period parsing + granularity decision.
-    const where = { UserId: userId, CategoryId: { [Op.in]: resolvedIds } };
+    const where = { UserId: userId, CategoryId: { [Op.in]: [...seriesKeysFor.keys()] } };
     let granularity = 'month';
     let rangeStart = null, rangeEnd = null;
 
@@ -222,14 +214,13 @@ router.get('/categories-timeline', async (req, res) => {
     txs.forEach(t => {
       const key = granularity === 'day' ? t.date : String(t.date || '').slice(0, 7);
       if (!seriesMap[key]) return;
-      const catKey = `cat_${t.CategoryId}`;
-      if (catKey in seriesMap[key]) {
+      for (const catKey of seriesKeysFor.get(t.CategoryId) || []) {
         seriesMap[key][catKey] += Number(t.amount);
       }
     });
 
     const series = buckets.map(b => seriesMap[b]);
-    const categories = cats.map(c => ({ id: c.id, name: c.name, color: c.color, type: c.type }));
+    const categories = cats.map(c => ({ id: c.id, name: c.name, color: c.color, type: c.type, parentId: c.parentId }));
 
     res.json({ granularity, series, categories });
   } catch (e) {
@@ -264,13 +255,15 @@ router.get('/export', async (req, res) => {
     if (excludeFrag) Object.assign(where, excludeFrag);
 
     // Load transactions
-    const txs = await Transaction.findAll({ where, include: [Category, Card] });
+    const txs = await Transaction.findAll({ where, include: [{ model: Category, include: [{ model: Category, as: 'parent' }] }, Card] });
+    const exportCategories = await Category.findAll({ where: { UserId: req.userId } });
 
     // Transactions sheet
     const transactionRows = txs.map(t => ({
       Type: t.type,
       Description: t.description,
       Category: t.Category?.name || '',
+      ParentCategory: t.Category?.parent?.name || '',
       Amount: Number(t.amount),
       Date: t.date,
       PaymentMethod: t.paymentMethod,
@@ -299,13 +292,10 @@ router.get('/export', async (req, res) => {
     const incomeVsExpenseRows = Object.values(monthMap).sort((a, b) => a.Month.localeCompare(b.Month));
 
     // Category totals (expenses only)
-    const categoryMap = {};
-    txs.filter(t => t.type === 'expense').forEach(t => {
-      const name = t.Category?.name || 'Uncategorized';
-      if (!categoryMap[name]) categoryMap[name] = { Category: name, Amount: 0 };
-      categoryMap[name].Amount += Number(t.amount);
-    });
-    const categoryRows = Object.values(categoryMap);
+    const categoryRows = groupByParent(txs, exportCategories, 'expense', '').flatMap(g => [
+      { Category: g.name, ParentCategory: '', Amount: g.amount },
+      ...g.children.map(c => ({ Category: c.name, ParentCategory: g.name, Amount: c.amount })),
+    ]);
 
     // Per card totals (expenses only)
     const perCardMap = {};
@@ -352,6 +342,7 @@ router.get('/export', async (req, res) => {
       { header: 'Type', key: 'Type', width: 12 },
       { header: 'Description', key: 'Description', width: 32 },
       { header: 'Category', key: 'Category', width: 18 },
+      { header: 'ParentCategory', key: 'ParentCategory', width: 18 },
       { header: 'Amount', key: 'Amount', width: 14 },
       { header: 'Date', key: 'Date', width: 12 },
       { header: 'PaymentMethod', key: 'PaymentMethod', width: 16 },
@@ -383,6 +374,7 @@ router.get('/export', async (req, res) => {
     // Categories
     const wsCategories = createSheet('Categories', [
       { header: 'Category', key: 'Category', width: 18 },
+      { header: 'ParentCategory', key: 'ParentCategory', width: 18 },
       { header: 'Amount', key: 'Amount', width: 14 },
     ], categoryRows);
     wsCategories.getColumn('Amount').numFmt = '0.00';

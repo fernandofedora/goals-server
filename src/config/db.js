@@ -123,6 +123,14 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Categories.monthlyBudget column');
     }
+    if (!descCats.parentId) {
+      await qi.addColumn('Categories', 'parentId', {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+      });
+      console.log('Migration: added Categories.parentId column');
+    }
     // Add isExcludedFromTotals to Accounts (cuentas "no integrar" / aisladas)
     const descAccts = await qi.describeTable('Accounts').catch(() => ({}));
     if (!descAccts.isExcludedFromTotals) {
