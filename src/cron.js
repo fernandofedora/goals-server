@@ -4,6 +4,7 @@ import { sequelize } from './config/db.js';
 import { ScheduledPayment, Transaction } from './models/index.js';
 import { syncCatalog } from './services/marketData/index.js';
 import { getRates } from './services/fx.js';
+import { checkBudgetThresholds } from './services/budgetAlerts.js';
 
 // Safety cap: never materialize more than this many occurrences for a single
 // payment in one catch-up pass, to guard against an unbounded loop on bad data.
@@ -80,6 +81,7 @@ export const processScheduledPayments = async () => {
     // read happens per-payment *inside* the transaction under a row lock below,
     // so a stale nextDueDate captured here can never cause a double insert.
     for (const candidate of scheduledPayments) {
+      let alertFor = null;
       try {
         // Catch-up: a payment may be overdue by many periods (server asleep on
         // shared hosting, or the previously missing catch-up loop). Materialize
@@ -170,6 +172,9 @@ export const processScheduledPayments = async () => {
             if (endDateStr && dueStr > endDateStr) status = 'paused';
           }
 
+          if (materialized > 0 && payment.type === 'expense') {
+            alertFor = { userId: payment.UserId, categoryId: payment.CategoryId };
+          }
           payment.nextDueDate = dueStr;
           payment.occurrences = occurrences;
           payment.status = status;
@@ -180,6 +185,10 @@ export const processScheduledPayments = async () => {
               `materialized ${materialized} transaction(s), next due: ${payment.nextDueDate}, status: ${payment.status}`,
           );
         });
+        // After commit, so the new expenses count toward the month.
+        if (alertFor) {
+          await checkBudgetThresholds(alertFor.userId, alertFor.categoryId, todayStr, todayStr);
+        }
       } catch (innerErr) {
         console.error(
           `Error processing individual payment ${candidate.id}:`,

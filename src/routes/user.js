@@ -20,6 +20,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       canAccessInvestments: user.canAccessInvestments,
       currency: user.currency || 'USD',
       language: user.language || 'en',
+      budgetAlertsEnabled: user.budgetAlertsEnabled,
     });
   } catch (e) {
     res.status(500).json({ message: 'Server error' });
@@ -33,6 +34,7 @@ router.put(
   async (req, res) => {
     try {
       const { name, email, currentPassword, currency, language } = req.body;
+      const { budgetAlertsEnabled } = req.body;
       const user = await User.findByPk(req.userId);
       if (!user) return res.status(404).json({ message: 'User not found' });
       const updates = {};
@@ -40,6 +42,8 @@ router.put(
       if (currency) updates.currency = currency;
       if (language && ['en', 'es'].includes(language))
         updates.language = language;
+      if (typeof budgetAlertsEnabled === 'boolean')
+        updates.budgetAlertsEnabled = budgetAlertsEnabled;
       if (email && email !== user.email) {
         if (!currentPassword)
           return res
@@ -57,6 +61,7 @@ router.put(
         email: user.email,
         currency: user.currency || 'USD',
         language: user.language || 'en',
+        budgetAlertsEnabled: user.budgetAlertsEnabled,
       });
     } catch (e) {
       res.status(500).json({ message: 'Server error' });

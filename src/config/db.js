@@ -262,6 +262,14 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Users.canAccessInvestments column');
     }
+    if (!desc.budgetAlertsEnabled) {
+      await qi.addColumn('Users', 'budgetAlertsEnabled', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      });
+      console.log('Migration: added Users.budgetAlertsEnabled column');
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query(
       'SELECT id FROM `Users` WHERE `publicId` IS NULL',

@@ -2,6 +2,7 @@ import express from 'express';
 import { Op, col, fn } from 'sequelize';
 import { authMiddleware } from '../middleware/auth.js';
 import { withChildIds } from '../utils/categoryTree.js';
+import { checkBudgetThresholds } from '../services/budgetAlerts.js';
 import { Transaction, Category, Card, Account } from '../models/index.js';
 
 const router = express.Router();
@@ -212,6 +213,12 @@ router.post('/bulk-delete', async (req, res) => {
   res.json({ deleted });
 });
 
+// Fire and forget: SMTP latency must not hold up the response, and the check
+// never throws.
+const alertIfExpense = (userId, tx) => {
+  if (tx.type === 'expense') checkBudgetThresholds(userId, tx.CategoryId, tx.date);
+};
+
 router.post('/', async (req, res) => {
   const {
     type,
@@ -234,6 +241,7 @@ router.post('/', async (req, res) => {
     CardId: cardId || null,
     AccountId: accountId || null,
   });
+  alertIfExpense(req.userId, item);
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
     include: [
@@ -270,6 +278,7 @@ router.put('/:id', async (req, res) => {
     CardId: cardId || null,
     AccountId: accountId || null,
   });
+  alertIfExpense(req.userId, item);
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
     include: [

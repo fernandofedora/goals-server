@@ -44,6 +44,12 @@ export const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: false,
   },
+  // Email when a category reaches 80% / 100% of its monthly budget.
+  budgetAlertsEnabled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
 });
 
 export const Category = sequelize.define('Category', {
@@ -119,6 +125,28 @@ export const SavingsContribution = sequelize.define('SavingsContribution', {
   date: { type: DataTypes.DATEONLY, allowNull: false },
   note: { type: DataTypes.STRING, allowNull: true },
 });
+
+// One row per alert sent, so each threshold is emailed once per category and month.
+export const BudgetAlertLog = sequelize.define(
+  'BudgetAlertLog',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    CategoryId: { type: DataTypes.INTEGER, allowNull: false },
+    year: { type: DataTypes.INTEGER, allowNull: false },
+    month: { type: DataTypes.INTEGER, allowNull: false },
+    threshold: { type: DataTypes.INTEGER, allowNull: false },
+  },
+  {
+    indexes: [
+      {
+        unique: true,
+        name: 'budget_alert_once',
+        fields: ['UserId', 'CategoryId', 'year', 'month', 'threshold'],
+      },
+    ],
+  },
+);
 
 export const Account = sequelize.define('Account', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
