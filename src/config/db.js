@@ -131,6 +131,23 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Categories.parentId column');
     }
+    const descPlans = await qi.describeTable('SavingsPlans').catch(() => ({}));
+    if (!descPlans.targetDate) {
+      await qi.addColumn('SavingsPlans', 'targetDate', {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        defaultValue: null,
+      });
+      console.log('Migration: added SavingsPlans.targetDate column');
+    }
+    if (!descPlans.initialAmount) {
+      await qi.addColumn('SavingsPlans', 'initialAmount', {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+        defaultValue: 0,
+      });
+      console.log('Migration: added SavingsPlans.initialAmount column');
+    }
     // Add isExcludedFromTotals to Accounts (cuentas "no integrar" / aisladas)
     const descAccts = await qi.describeTable('Accounts').catch(() => ({}));
     if (!descAccts.isExcludedFromTotals) {

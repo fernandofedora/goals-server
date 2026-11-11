@@ -103,6 +103,14 @@ export const SavingsPlan = sequelize.define('SavingsPlan', {
     defaultValue: 'active',
   },
   linkedCategoryId: { type: DataTypes.INTEGER, allowNull: true },
+  // Optional deadline; drives the on-track/behind status in routes/savings.js.
+  targetDate: { type: DataTypes.DATEONLY, allowNull: true, defaultValue: null },
+  // Saved before the plan existed; counts toward progress.
+  initialAmount: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+    defaultValue: 0,
+  },
 });
 
 export const SavingsContribution = sequelize.define('SavingsContribution', {
