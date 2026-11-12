@@ -1,6 +1,7 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { Category, Transaction } from '../models/index.js';
+import { Category, Transaction, User } from '../models/index.js';
+import { addSuggestedCategories } from '../utils/categoryCatalog.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -64,6 +65,13 @@ router.post('/', async (req, res) => {
     UserId: req.userId,
   });
   res.json(plain(item));
+});
+
+// Adds the suggested categories the user is missing; never touches their own.
+router.post('/suggested', async (req, res) => {
+  const user = await User.findByPk(req.userId);
+  const created = await addSuggestedCategories(req.userId, user?.language);
+  res.json({ created });
 });
 
 router.put('/:id', async (req, res) => {
