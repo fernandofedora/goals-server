@@ -52,7 +52,16 @@ router.get('/summary', async (req, res) => {
     const excludeFrag = await excludeIsolatedAccounts(req.userId);
     if (excludeFrag) Object.assign(where, excludeFrag);
 
-    const txs = await Transaction.findAll({ where, include: [Category, Card, Account] });
+    const loaded = await Transaction.findAll({ where, include: [Category, Card, Account] });
+    // Transfers between own accounts are reported apart, never as income or expense.
+    const isTransfer = (t) => t.Category?.type === 'transfer';
+    const txs = loaded.filter(t => !isTransfer(t));
+    const transferTxs = loaded.filter(isTransfer);
+    const transfers = {
+      in: transferTxs.filter(t => t.type === 'income').reduce((a, b) => a + Number(b.amount), 0),
+      out: transferTxs.filter(t => t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
+      transactions: transferTxs.length,
+    };
 
     // Totals
     const income = txs.filter(t => t.type === 'income').reduce((a, b) => a + Number(b.amount), 0);
@@ -99,7 +108,7 @@ router.get('/summary', async (req, res) => {
     // Income categories (income by category)
     const incomeCategories = groupByParent(txs, allCategories, 'income', '#10b981');
 
-    res.json({ totals, categories, incomeCategories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
+    res.json({ totals, transfers, categories, incomeCategories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -255,12 +264,14 @@ router.get('/export', async (req, res) => {
     if (excludeFrag) Object.assign(where, excludeFrag);
 
     // Load transactions
-    const txs = await Transaction.findAll({ where, include: [{ model: Category, include: [{ model: Category, as: 'parent' }] }, Card] });
+    const loaded = await Transaction.findAll({ where, include: [{ model: Category, include: [{ model: Category, as: 'parent' }] }, Card] });
+    // The Transactions sheet lists everything; totals and breakdowns skip transfers.
+    const txs = loaded.filter(t => t.Category?.type !== 'transfer');
     const exportCategories = await Category.findAll({ where: { UserId: req.userId } });
 
     // Transactions sheet
-    const transactionRows = txs.map(t => ({
-      Type: t.type,
+    const transactionRows = loaded.map(t => ({
+      Type: t.Category?.type === 'transfer' ? 'transfer' : t.type,
       Description: t.description,
       Category: t.Category?.name || '',
       ParentCategory: t.Category?.parent?.name || '',

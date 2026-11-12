@@ -182,7 +182,8 @@ router.get('/', async (req, res) => {
   res.json(items);
 });
 
-// Only rows of the same type as the category change; the rest are reported.
+// Only rows of the same type as the category change (any type for a transfer
+// category); the rest are reported.
 router.patch('/bulk', async (req, res) => {
   const ids = parseIds(req.body.ids);
   if (!ids) return res.status(400).json({ message: 'Invalid ids' });
@@ -191,9 +192,11 @@ router.patch('/bulk', async (req, res) => {
   });
   if (!category) return res.status(404).json({ message: 'Category not found' });
 
+  // A transfer category fits both legs (expense out, income in).
+  const typeMatch = category.type === 'transfer' ? {} : { type: category.type };
   await Transaction.update(
     { CategoryId: category.id },
-    { where: { id: ids, UserId: req.userId, type: category.type } },
+    { where: { id: ids, UserId: req.userId, ...typeMatch } },
   );
   const updated = await Transaction.count({
     where: { id: ids, UserId: req.userId, CategoryId: category.id },

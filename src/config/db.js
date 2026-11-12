@@ -131,6 +131,13 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Categories.parentId column');
     }
+    // Expand Categories.type ENUM to include 'transfer'.
+    if (descCats.type && !String(descCats.type.type).includes('transfer')) {
+      await sequelize.query(
+        "ALTER TABLE `Categories` MODIFY COLUMN `type` ENUM('expense','income','transfer') NOT NULL",
+      );
+      console.log('Migration: Categories.type ENUM expanded to include transfer');
+    }
     const descPlans = await qi.describeTable('SavingsPlans').catch(() => ({}));
     if (!descPlans.targetDate) {
       await qi.addColumn('SavingsPlans', 'targetDate', {

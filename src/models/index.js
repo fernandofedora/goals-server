@@ -56,7 +56,12 @@ export const Category = sequelize.define('Category', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
   color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#3b82f6' },
-  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false },
+  // 'transfer' moves money between own accounts: it changes balances but is
+  // left out of income, expense, budgets and category charts.
+  type: {
+    type: DataTypes.ENUM('expense', 'income', 'transfer'),
+    allowNull: false,
+  },
   monthlyBudget: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: true,
