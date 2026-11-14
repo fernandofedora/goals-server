@@ -111,6 +111,29 @@ async function netPerDay(where, dates) {
   );
 }
 
+// Transfers between own accounts. In the general history they stay listed but
+// leave the income/expense totals (like the dashboard); in one account's or
+// card's history they count, so the totals match its balance.
+async function splitTransfers(where, userId, keepInTotals) {
+  const transferCats = await Category.findAll({
+    where: { UserId: userId, type: 'transfer' },
+    attributes: ['id'],
+  });
+  const ids = transferCats.map((c) => c.id);
+  if (ids.length === 0) return { totalsWhere: where, transfers: null };
+  const only = (cond) => ({ ...where, [Op.and]: [...(where[Op.and] || []), cond] });
+  const legs = await filteredTotals(only({ CategoryId: ids }));
+  if (legs.income === 0 && legs.expense === 0) {
+    return { totalsWhere: where, transfers: null };
+  }
+  return {
+    totalsWhere: keepInTotals
+      ? where
+      : only({ [Op.or]: [{ CategoryId: null }, { CategoryId: { [Op.notIn]: ids } }] }),
+    transfers: { in: legs.income, out: legs.expense, inTotals: keepInTotals },
+  };
+}
+
 router.get('/', async (req, res) => {
   const { cardId, accountId, page, limit } = req.query;
   const { where, error } = buildFilters(req.query, req.userId);
@@ -163,9 +186,14 @@ router.get('/', async (req, res) => {
       limit: limitInt,
     });
     const dates = [...new Set(rows.map((r) => r.date))];
+    const { totalsWhere, transfers } = await splitTransfers(
+      where,
+      req.userId,
+      Boolean(accountId || cardId),
+    );
     const [totals, dayTotals] = await Promise.all([
-      filteredTotals(where),
-      netPerDay(where, dates),
+      filteredTotals(totalsWhere),
+      netPerDay(totalsWhere, dates),
     ]);
     res.json({
       items: rows,
@@ -174,6 +202,7 @@ router.get('/', async (req, res) => {
       total: count,
       totals,
       dayTotals,
+      transfers,
     });
     return;
   }

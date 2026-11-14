@@ -75,3 +75,28 @@ describe('transfer categories', () => {
     expect(res.body).toEqual({ updated: 2, skipped: 0 });
   });
 });
+
+describe('transfers in the transaction history', () => {
+  const list = (query = {}) =>
+    request(app).get('/api/transactions').query({ page: 1, limit: 50, ...query }).set(auth);
+
+  it('lists them but leaves them out of the general totals', async () => {
+    const res = await list();
+    expect(res.body.total).toBe(4);
+    expect(res.body.totals).toEqual({ income: 500, expense: 40 });
+    expect(res.body.dayTotals['2026-03-10']).toBe(460);
+    expect(res.body.transfers).toEqual({ in: 200, out: 200, inTotals: false });
+  });
+
+  it('keeps them in the totals of one account', async () => {
+    const res = await list({ accountId: bank.id });
+    expect(res.body.totals).toEqual({ income: 0, expense: 200 });
+    expect(res.body.transfers).toEqual({ in: 0, out: 200, inTotals: true });
+  });
+
+  it('reports no transfers when the filtered set has none', async () => {
+    const res = await list({ categoryId: food.id });
+    expect(res.body.totals).toEqual({ income: 0, expense: 40 });
+    expect(res.body.transfers).toBeNull();
+  });
+});
