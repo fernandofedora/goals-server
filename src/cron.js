@@ -5,6 +5,7 @@ import { ScheduledPayment, Transaction } from './models/index.js';
 import { syncCatalog } from './services/marketData/index.js';
 import { getRates } from './services/fx.js';
 import { checkBudgetThresholds } from './services/budgetAlerts.js';
+import { recordNetWorthSnapshots } from './services/netWorth.js';
 
 // Safety cap: never materialize more than this many occurrences for a single
 // payment in one catch-up pass, to guard against an unbounded loop on bad data.
@@ -240,3 +241,14 @@ export const refreshMarketData = async () => {
 };
 
 cron.schedule('30 5 * * *', refreshMarketData);
+
+// Net worth: late in the day, after markets close, so the value saved on the
+// last day of a month is that month's close.
+cron.schedule('50 23 * * *', async () => {
+  try {
+    const saved = await recordNetWorthSnapshots();
+    console.log(`Net worth snapshots saved: ${saved}`);
+  } catch (err) {
+    console.error('Net worth snapshots failed:', err.message);
+  }
+});

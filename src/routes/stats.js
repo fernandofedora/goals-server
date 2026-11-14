@@ -6,9 +6,11 @@ import {
   Card,
   Budget,
   Account,
+  User,
 } from '../models/index.js';
 import ExcelJS from 'exceljs';
 import { groupByParent } from '../utils/categoryTree.js';
+import { netWorthHistory } from '../services/netWorth.js';
 import { Op } from 'sequelize';
 
 const router = express.Router();
@@ -580,6 +582,40 @@ router.get('/export', async (req, res) => {
     );
     res.send(Buffer.from(buf));
   } catch (e) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ── Net worth ───────────────────────────────────────────────────────────────
+// GET /api/stats/net-worth: today's total and the last 12 month closes.
+router.get('/net-worth', async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const { current, history, includesInvestments } = await netWorthHistory(
+      user,
+      13,
+    );
+    const change = (from) => {
+      if (!from) return null;
+      const amount = Math.round((current.total - from.total) * 100) / 100;
+      return {
+        amount,
+        percent:
+          from.total !== 0
+            ? Math.round((amount / Math.abs(from.total)) * 1000) / 10
+            : null,
+      };
+    };
+    res.json({
+      current,
+      includesInvestments,
+      changeMonth: change(history[history.length - 2]),
+      changeYear: change(history[0]),
+      history: history.slice(1),
+    });
+  } catch (e) {
+    console.error(e);
     res.status(500).json({ message: 'Server error' });
   }
 });

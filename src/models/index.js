@@ -153,6 +153,22 @@ export const BudgetAlertLog = sequelize.define(
   },
 );
 
+// One row per user and month (date = last day of the month). The daily cron
+// keeps the running month up to date, so a closed month keeps its market value.
+export const NetWorthSnapshot = sequelize.define(
+  'NetWorthSnapshot',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    date: { type: DataTypes.DATEONLY, allowNull: false },
+    accounts: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+    investments: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+    debts: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+    total: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+  },
+  { indexes: [{ unique: true, name: 'net_worth_month', fields: ['UserId', 'date'] }] },
+);
+
 export const Account = sequelize.define('Account', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
