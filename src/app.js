@@ -18,7 +18,9 @@ import importRoutes from './routes/import.js';
 // Separate from index.js so tests can mount the API without listening or booting the DB.
 export const app = express();
 
-app.use(cors());
+// Downloads name their file in Content-Disposition; browsers hide it from
+// another origin unless it is exposed.
+app.use(cors({ exposedHeaders: ['Content-Disposition'] }));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);

@@ -120,21 +120,21 @@ const COPY = {
       ],
     ],
     demo: [
-      ['Supermercado', 'expense', 62.4, 'expense'],
-      ['Salario de noviembre', 'income', 1500, 'income'],
-      ['Gasolina', 'expense', 35, null],
-      ['Restaurante', 'expense', 28.75, 'expense'],
-      ['Luz', 'expense', 45.1, 'expense'],
-      ['Farmacia', 'expense', 12.99, null],
-      ['Internet', 'expense', 30, 'expense'],
-      ['Venta de bicicleta usada', 'income', 120, null],
-      ['Cine', 'expense', 9.5, 'expense'],
-      ['Café', 'expense', 3.25, null],
-      ['Reembolso de compra', 'income', 18.4, 'income'],
-      ['Agua', 'expense', 15, 'expense'],
-      ['Taxi', 'expense', 7.8, null],
-      ['Ropa', 'expense', 54, 'expense'],
-      ['Intereses de ahorro', 'income', 2.35, 'income'],
+      ['Supermercado', 'expense', 62.4],
+      ['Salario de noviembre', 'income', 1500],
+      ['Gasolina', 'expense', 35],
+      ['Restaurante', 'expense', 28.75],
+      ['Luz', 'expense', 45.1],
+      ['Farmacia', 'expense', 12.99],
+      ['Internet', 'expense', 30],
+      ['Venta de bicicleta usada', 'income', 120],
+      ['Cine', 'expense', 9.5],
+      ['Café', 'expense', 3.25],
+      ['Reembolso de compra', 'income', 18.4],
+      ['Agua', 'expense', 15],
+      ['Taxi', 'expense', 7.8],
+      ['Ropa', 'expense', 54],
+      ['Intereses de ahorro', 'income', 2.35],
     ],
   },
   en: {
@@ -215,24 +215,44 @@ const COPY = {
       ],
     ],
     demo: [
-      ['Groceries', 'expense', 62.4, 'expense'],
-      ['November salary', 'income', 1500, 'income'],
-      ['Gas', 'expense', 35, null],
-      ['Restaurant', 'expense', 28.75, 'expense'],
-      ['Electricity', 'expense', 45.1, 'expense'],
-      ['Pharmacy', 'expense', 12.99, null],
-      ['Internet', 'expense', 30, 'expense'],
-      ['Sold used bike', 'income', 120, null],
-      ['Movies', 'expense', 9.5, 'expense'],
-      ['Coffee', 'expense', 3.25, null],
-      ['Purchase refund', 'income', 18.4, 'income'],
-      ['Water', 'expense', 15, 'expense'],
-      ['Taxi', 'expense', 7.8, null],
-      ['Clothes', 'expense', 54, 'expense'],
-      ['Savings interest', 'income', 2.35, 'income'],
+      ['Groceries', 'expense', 62.4],
+      ['November salary', 'income', 1500],
+      ['Gas', 'expense', 35],
+      ['Restaurant', 'expense', 28.75],
+      ['Electricity', 'expense', 45.1],
+      ['Pharmacy', 'expense', 12.99],
+      ['Internet', 'expense', 30],
+      ['Sold used bike', 'income', 120],
+      ['Movies', 'expense', 9.5],
+      ['Coffee', 'expense', 3.25],
+      ['Purchase refund', 'income', 18.4],
+      ['Water', 'expense', 15],
+      ['Taxi', 'expense', 7.8],
+      ['Clothes', 'expense', 54],
+      ['Savings interest', 'income', 2.35],
     ],
   },
 };
+
+// Category names (catalog and old defaults, both languages) that suit each demo
+// row, in the same order as COPY[lang].demo. Empty: shows an uncategorized row.
+const DEMO_HINTS = [
+  ['Supermercado', 'Groceries', 'Comida', 'Food'],
+  ['Salario', 'Salary'],
+  ['Combustible', 'Fuel', 'Transporte', 'Transportation'],
+  ['Restaurantes', 'Restaurants', 'Comida', 'Food'],
+  ['Luz', 'Electricity', 'Hogar', 'Home', 'Utilities', 'Housing'],
+  ['Farmacia', 'Pharmacy', 'Salud', 'Health', 'Healthcare'],
+  ['Internet y teléfono', 'Internet and phone', 'Hogar', 'Home', 'Utilities'],
+  ['Otros ingresos', 'Other income'],
+  ['Salidas', 'Going out', 'Entretenimiento', 'Entertainment'],
+  [],
+  ['Reembolsos', 'Refunds'],
+  ['Agua', 'Water', 'Hogar', 'Home', 'Utilities'],
+  [],
+  ['Ropa', 'Clothing', 'Compras personales', 'Personal shopping'],
+  ['Intereses', 'Interest', 'Inversiones', 'Investments'],
+];
 
 // Rows of the instructions sheet that are headings (same layout in both languages).
 const HELP_BOLD_ROWS = [7, 14];
@@ -354,22 +374,23 @@ export async function buildTemplate({
   }
 
   if (demo) {
-    const byType = {
-      expense: names.filter((n) =>
-        categories.some((c) => c.name === n && c.type === 'expense'),
-      ),
-      income: names.filter((n) =>
-        categories.some((c) => c.name === n && c.type === 'income'),
-      ),
-    };
-    const used = { expense: 0, income: 0 };
-    copy.demo.forEach(([description, type, amount, categoryType], i) => {
+    const fold = (s) =>
+      String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+    copy.demo.forEach(([description, type, amount], i) => {
       const day = Math.min(i + 1, 28);
-      const pool = categoryType ? byType[categoryType] : [];
-      // Rotate through the user's own categories so the demo imports as is.
-      const category = pool.length
-        ? pool[used[categoryType]++ % pool.length]
-        : null;
+      // The first of the user's own categories that fits this sample row, so
+      // the example imports as is; none fits, the cell stays empty.
+      const hints = DEMO_HINTS[i].map(fold);
+      const category =
+        hints
+          .map((hint) =>
+            categories.find(
+              (c) =>
+                fold(c.name) === hint &&
+                (c.type === type || c.type === 'transfer'),
+            ),
+          )
+          .find(Boolean)?.name ?? null;
       sheet.addRow({
         date: excelDate(
           `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(day)}`,
