@@ -33,6 +33,16 @@ export const connectDB = async () => {
     // Link materialized transactions back to their ScheduledPayment so a unique
     // (ScheduledPaymentId, date) index can make duplicate materialization of the
     // same occurrence physically impossible (see cron.js).
+    if (!descTrans.importBatchId) {
+      await qi.addColumn('Transactions', 'importBatchId', {
+        type: DataTypes.STRING(36),
+        allowNull: true,
+      });
+      await qi.addIndex('Transactions', ['UserId', 'importBatchId'], {
+        name: 'tx_import_batch',
+      });
+      console.log('Migration: added Transactions.importBatchId column');
+    }
     if (!descTrans.ScheduledPaymentId) {
       await qi.addColumn('Transactions', 'ScheduledPaymentId', {
         type: DataTypes.INTEGER,

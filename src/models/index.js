@@ -95,6 +95,8 @@ export const Transaction = sequelize.define('Transaction', {
   // for manually-entered ones). A unique (ScheduledPaymentId, date) index makes
   // duplicate materialization of the same occurrence impossible. See cron.js.
   ScheduledPaymentId: { type: DataTypes.INTEGER, allowNull: true },
+  // Set on rows created by a file import, so the whole batch can be undone.
+  importBatchId: { type: DataTypes.STRING(36), allowNull: true },
 });
 
 export const Budget = sequelize.define('Budget', {
