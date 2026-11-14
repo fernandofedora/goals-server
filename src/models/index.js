@@ -169,6 +169,21 @@ export const NetWorthSnapshot = sequelize.define(
   { indexes: [{ unique: true, name: 'net_worth_month', fields: ['UserId', 'date'] }] },
 );
 
+// "If the description contains UBER, use Transporte": the first active rule by
+// priority that matches picks the category (see utils/categoryRules.js).
+export const CategoryRule = sequelize.define('CategoryRule', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING(80), allowNull: false },
+  field: { type: DataTypes.ENUM('description', 'amount'), allowNull: false },
+  operator: {
+    type: DataTypes.ENUM('contains', 'notContains', 'equals', 'startsWith', 'gt', 'lt'),
+    allowNull: false,
+  },
+  value: { type: DataTypes.STRING(100), allowNull: false },
+  priority: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+});
+
 export const Account = sequelize.define('Account', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
@@ -322,6 +337,10 @@ Card.belongsTo(User);
 User.hasMany(Transaction);
 Transaction.belongsTo(User);
 Category.hasMany(Transaction);
+User.hasMany(CategoryRule, { onDelete: 'CASCADE' });
+CategoryRule.belongsTo(User);
+Category.hasMany(CategoryRule, { onDelete: 'CASCADE' });
+CategoryRule.belongsTo(Category);
 Category.belongsTo(Category, { as: 'parent', foreignKey: 'parentId' });
 Category.hasMany(Category, { as: 'children', foreignKey: 'parentId' });
 Transaction.belongsTo(Category);

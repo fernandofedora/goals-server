@@ -3,6 +3,7 @@ import { Op, col, fn } from 'sequelize';
 import { authMiddleware } from '../middleware/auth.js';
 import { withChildIds } from '../utils/categoryTree.js';
 import { checkBudgetThresholds } from '../services/budgetAlerts.js';
+import { applyRules } from '../utils/categoryRules.js';
 import { Transaction, Category, Card, Account } from '../models/index.js';
 
 const router = express.Router();
@@ -262,6 +263,10 @@ router.post('/', async (req, res) => {
     cardId,
     accountId,
   } = req.body;
+  // Without a category, the user's rules may pick one.
+  const ruledCategoryId = categoryId
+    ? null
+    : await applyRules(req.userId, { description, amount, type });
   const item = await Transaction.create({
     type,
     description,
@@ -269,7 +274,7 @@ router.post('/', async (req, res) => {
     date,
     paymentMethod,
     UserId: req.userId,
-    CategoryId: categoryId || null,
+    CategoryId: categoryId || ruledCategoryId,
     CardId: cardId || null,
     AccountId: accountId || null,
   });
