@@ -212,6 +212,29 @@ router.get('/', async (req, res) => {
   res.json(items);
 });
 
+// Inbox of transactions without a category: how many and the next ones to sort.
+router.get('/uncategorized', async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const where = { UserId: req.userId, CategoryId: null };
+  const [count, items] = await Promise.all([
+    Transaction.count({ where }),
+    Transaction.findAll({
+      where,
+      attributes: ['id', 'date', 'description', 'amount', 'type', 'paymentMethod'],
+      include: [
+        { model: Card, attributes: ['id', 'name'] },
+        { model: Account, attributes: ['id', 'name'] },
+      ],
+      order: [
+        ['date', 'DESC'],
+        ['id', 'DESC'],
+      ],
+      limit,
+    }),
+  ]);
+  res.json({ count, items });
+});
+
 // Only rows of the same type as the category change (any type for a transfer
 // category); the rest are reported.
 router.patch('/bulk', async (req, res) => {

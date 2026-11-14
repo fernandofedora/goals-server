@@ -239,3 +239,25 @@ describe('bulk actions', () => {
     },
   );
 });
+
+describe('GET /api/transactions/uncategorized', () => {
+  it('counts and lists only the user transactions without category, newest first', async () => {
+    const { user: owner, auth: ownerAuth } = await createUser();
+    const cat = await createCategory(owner, 'Comida');
+    const make = (description, date, CategoryId = null) =>
+      Transaction.create({ description, type: 'expense', amount: 5, date, paymentMethod: 'cash', UserId: owner.id, CategoryId });
+    await make('Vieja', '2026-01-01');
+    await make('Nueva', '2026-03-01');
+    await make('Con categoría', '2026-03-02', cat.id);
+    const other = await createUser();
+    await Transaction.create({ description: 'Ajena', type: 'expense', amount: 1, date: '2026-03-03', paymentMethod: 'cash', UserId: other.user.id });
+
+    const res = await request(app).get('/api/transactions/uncategorized').set(ownerAuth);
+    expect(res.body.count).toBe(2);
+    expect(res.body.items.map((t) => t.description)).toEqual(['Nueva', 'Vieja']);
+
+    const one = await request(app).get('/api/transactions/uncategorized?limit=1').set(ownerAuth);
+    expect(one.body).toMatchObject({ count: 2 });
+    expect(one.body.items).toHaveLength(1);
+  });
+});
