@@ -1,9 +1,15 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { Transaction, Category, Card, Budget, Account } from '../models/index.js';
+import {
+  Transaction,
+  Category,
+  Card,
+  Budget,
+  Account,
+} from '../models/index.js';
 import ExcelJS from 'exceljs';
 import { groupByParent } from '../utils/categoryTree.js';
-import { Op } from 'sequelize'
+import { Op } from 'sequelize';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -11,8 +17,11 @@ router.use(authMiddleware);
 // Build a WHERE fragment that excludes transactions belonging to "no integrar"
 // (isolated) accounts, while keeping transactions with no account (cash/card).
 const excludeIsolatedAccounts = async (userId) => {
-  const isolated = await Account.findAll({ where: { UserId: userId, isExcludedFromTotals: true }, attributes: ['id'] });
-  const ids = isolated.map(a => a.id);
+  const isolated = await Account.findAll({
+    where: { UserId: userId, isExcludedFromTotals: true },
+    attributes: ['id'],
+  });
+  const ids = isolated.map((a) => a.id);
   if (ids.length === 0) return null;
   return { [Op.or]: [{ AccountId: null }, { AccountId: { [Op.notIn]: ids } }] };
 };
@@ -22,7 +31,14 @@ const periodFilter = (month, year) => {
   if (!month || !year) return {};
   const start = new Date(year, month - 1, 1);
   const end = new Date(year, month, 0);
-  return { date: { $between: [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)] } };
+  return {
+    date: {
+      $between: [
+        start.toISOString().slice(0, 10),
+        end.toISOString().slice(0, 10),
+      ],
+    },
+  };
 };
 
 router.get('/summary', async (req, res) => {
@@ -31,7 +47,8 @@ router.get('/summary', async (req, res) => {
     const where = { UserId: req.userId };
 
     // Custom date range takes priority over period
-    let month = null, year = null;
+    let month = null,
+      year = null;
     if (from && to) {
       where.date = { [Op.between]: [from, to] };
     } else if (period && period !== 'all') {
@@ -40,8 +57,10 @@ router.get('/summary', async (req, res) => {
         where.date = { [Op.between]: [`${year}-01-01`, `${year}-12-31`] };
       } else {
         const parts = String(period).split('-');
-        year = Number(parts[0]); month = Number(parts[1]);
-        if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
+        year = Number(parts[0]);
+        month = Number(parts[1]);
+        if (!year || !month)
+          return res.status(400).json({ message: 'Invalid period' });
         const start = `${year}-${String(month).padStart(2, '0')}-01`;
         const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
         where.date = { [Op.between]: [start, end] };
@@ -52,63 +71,113 @@ router.get('/summary', async (req, res) => {
     const excludeFrag = await excludeIsolatedAccounts(req.userId);
     if (excludeFrag) Object.assign(where, excludeFrag);
 
-    const loaded = await Transaction.findAll({ where, include: [Category, Card, Account] });
+    const loaded = await Transaction.findAll({
+      where,
+      include: [Category, Card, Account],
+    });
     // Transfers between own accounts are reported apart, never as income or expense.
     const isTransfer = (t) => t.Category?.type === 'transfer';
-    const txs = loaded.filter(t => !isTransfer(t));
+    const txs = loaded.filter((t) => !isTransfer(t));
     const transferTxs = loaded.filter(isTransfer);
     const transfers = {
-      in: transferTxs.filter(t => t.type === 'income').reduce((a, b) => a + Number(b.amount), 0),
-      out: transferTxs.filter(t => t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
+      in: transferTxs
+        .filter((t) => t.type === 'income')
+        .reduce((a, b) => a + Number(b.amount), 0),
+      out: transferTxs
+        .filter((t) => t.type === 'expense')
+        .reduce((a, b) => a + Number(b.amount), 0),
       transactions: transferTxs.length,
     };
 
     // Totals
-    const income = txs.filter(t => t.type === 'income').reduce((a, b) => a + Number(b.amount), 0);
-    const expense = txs.filter(t => t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0);
-    const totals = { income, expense, transactions: txs.length, balance: income - expense };
+    const income = txs
+      .filter((t) => t.type === 'income')
+      .reduce((a, b) => a + Number(b.amount), 0);
+    const expense = txs
+      .filter((t) => t.type === 'expense')
+      .reduce((a, b) => a + Number(b.amount), 0);
+    const totals = {
+      income,
+      expense,
+      transactions: txs.length,
+      balance: income - expense,
+    };
 
     // Categories (expenses only) — fetch all user categories to attach fixed monthlyBudget
-    const allCategories = await Category.findAll({ where: { UserId: req.userId } });
+    const allCategories = await Category.findAll({
+      where: { UserId: req.userId },
+    });
     const categories = groupByParent(txs, allCategories, 'expense', '#3b82f6');
 
     // Income vs Expense timeseries (by day)
     const dayMap = {};
-    txs.forEach(t => {
+    txs.forEach((t) => {
       const d = t.date; // DATEONLY string 'YYYY-MM-DD'
       if (!dayMap[d]) dayMap[d] = { date: d, income: 0, expense: 0 };
       if (t.type === 'income') dayMap[d].income += Number(t.amount);
       else if (t.type === 'expense') dayMap[d].expense += Number(t.amount);
     });
-    const incomeVsExpense = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date));
+    const incomeVsExpense = Object.values(dayMap).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
 
     // Payment methods breakdown (expenses only)
     const paymentMethods = {
-      cash: txs.filter(t => t.paymentMethod === 'cash' && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
-      card: txs.filter(t => t.paymentMethod === 'card' && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0),
-      account: txs.filter(t => t.paymentMethod === 'account' && t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0)
+      cash: txs
+        .filter((t) => t.paymentMethod === 'cash' && t.type === 'expense')
+        .reduce((a, b) => a + Number(b.amount), 0),
+      card: txs
+        .filter((t) => t.paymentMethod === 'card' && t.type === 'expense')
+        .reduce((a, b) => a + Number(b.amount), 0),
+      account: txs
+        .filter((t) => t.paymentMethod === 'account' && t.type === 'expense')
+        .reduce((a, b) => a + Number(b.amount), 0),
     };
 
     // Per card breakdown (expenses only)
     const perCard = {};
-    txs.filter(t => t.paymentMethod === 'card' && t.type === 'expense').forEach(t => {
-      const name = t.Card?.name || 'Unknown';
-      perCard[name] = (perCard[name] || 0) + Number(t.amount);
-    });
+    txs
+      .filter((t) => t.paymentMethod === 'card' && t.type === 'expense')
+      .forEach((t) => {
+        const name = t.Card?.name || 'Unknown';
+        perCard[name] = (perCard[name] || 0) + Number(t.amount);
+      });
 
     // Budget amount for the selected month
-    const budget = (month && year) ? await Budget.findOne({ where: { UserId: req.userId, month, year } }) : null;
+    const budget =
+      month && year
+        ? await Budget.findOne({ where: { UserId: req.userId, month, year } })
+        : null;
 
     // Income methods breakdown
     const incomeMethods = {
-      cash: txs.filter(t => t.type === 'income' && t.paymentMethod === 'cash').reduce((a, b) => a + Number(b.amount), 0),
-      account: txs.filter(t => t.type === 'income' && t.paymentMethod === 'account').reduce((a, b) => a + Number(b.amount), 0),
+      cash: txs
+        .filter((t) => t.type === 'income' && t.paymentMethod === 'cash')
+        .reduce((a, b) => a + Number(b.amount), 0),
+      account: txs
+        .filter((t) => t.type === 'income' && t.paymentMethod === 'account')
+        .reduce((a, b) => a + Number(b.amount), 0),
     };
 
     // Income categories (income by category)
-    const incomeCategories = groupByParent(txs, allCategories, 'income', '#10b981');
+    const incomeCategories = groupByParent(
+      txs,
+      allCategories,
+      'income',
+      '#10b981',
+    );
 
-    res.json({ totals, transfers, categories, incomeCategories, incomeVsExpense, paymentMethods, perCard, budgetAmount: budget?.amount || null, incomeMethods });
+    res.json({
+      totals,
+      transfers,
+      categories,
+      incomeCategories,
+      incomeVsExpense,
+      paymentMethods,
+      perCard,
+      budgetAmount: budget?.amount || null,
+      incomeMethods,
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -125,9 +194,10 @@ router.get('/categories-timeline', async (req, res) => {
     // Parse explicit category filter (CSV → number[]).
     let catFilter = null;
     if (categoryIds) {
-      const ids = String(categoryIds).split(',')
-        .map(s => Number(s.trim()))
-        .filter(n => Number.isInteger(n) && n > 0);
+      const ids = String(categoryIds)
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0);
       if (ids.length > 0) catFilter = ids;
     }
 
@@ -136,10 +206,12 @@ router.get('/categories-timeline', async (req, res) => {
     if (catFilter) categoriesWhere.id = catFilter;
     else Object.assign(categoriesWhere, { type: 'expense', parentId: null });
     const cats = await Category.findAll({ where: categoriesWhere });
-    const resolvedIds = cats.map(c => c.id);
+    const resolvedIds = cats.map((c) => c.id);
     // A selected parent's line also carries its subcategories' spending.
-    const children = await Category.findAll({ where: { UserId: userId, parentId: resolvedIds } });
-    const seriesKeysFor = new Map(resolvedIds.map(id => [id, [`cat_${id}`]]));
+    const children = await Category.findAll({
+      where: { UserId: userId, parentId: resolvedIds },
+    });
+    const seriesKeysFor = new Map(resolvedIds.map((id) => [id, [`cat_${id}`]]));
     for (const child of children) {
       const keys = seriesKeysFor.get(child.id) || [];
       seriesKeysFor.set(child.id, [...keys, `cat_${child.parentId}`]);
@@ -149,13 +221,18 @@ router.get('/categories-timeline', async (req, res) => {
     }
 
     // Period parsing + granularity decision.
-    const where = { UserId: userId, CategoryId: { [Op.in]: [...seriesKeysFor.keys()] } };
+    const where = {
+      UserId: userId,
+      CategoryId: { [Op.in]: [...seriesKeysFor.keys()] },
+    };
     let granularity = 'month';
-    let rangeStart = null, rangeEnd = null;
+    let rangeStart = null,
+      rangeEnd = null;
 
     if (from && to) {
       where.date = { [Op.between]: [from, to] };
-      rangeStart = from; rangeEnd = to;
+      rangeStart = from;
+      rangeEnd = to;
     } else if (period && period !== 'all') {
       if (/^\d{4}$/.test(String(period))) {
         const year = Number(period);
@@ -164,8 +241,10 @@ router.get('/categories-timeline', async (req, res) => {
         where.date = { [Op.between]: [rangeStart, rangeEnd] };
       } else if (/^\d{4}-\d{2}$/.test(String(period))) {
         const [yStr, mStr] = String(period).split('-');
-        const year = Number(yStr), month = Number(mStr);
-        if (!year || !month) return res.status(400).json({ message: 'Invalid period' });
+        const year = Number(yStr),
+          month = Number(mStr);
+        if (!year || !month)
+          return res.status(400).json({ message: 'Invalid period' });
         const lastDay = new Date(year, month, 0).getDate();
         rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
         rangeEnd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
@@ -183,9 +262,13 @@ router.get('/categories-timeline', async (req, res) => {
     if (!rangeStart || !rangeEnd) {
       if (txs.length === 0) {
         const today = new Date().toISOString().slice(0, 10);
-        rangeStart = today; rangeEnd = today;
+        rangeStart = today;
+        rangeEnd = today;
       } else {
-        const dates = txs.map(t => t.date).filter(Boolean).sort();
+        const dates = txs
+          .map((t) => t.date)
+          .filter(Boolean)
+          .sort();
         rangeStart = dates[0];
         rangeEnd = dates[dates.length - 1];
       }
@@ -203,33 +286,46 @@ router.get('/categories-timeline', async (req, res) => {
     } else {
       const [sy, sm] = rangeStart.slice(0, 7).split('-').map(Number);
       const [ey, em] = rangeEnd.slice(0, 7).split('-').map(Number);
-      let y = sy, m = sm;
+      let y = sy,
+        m = sm;
       while (y < ey || (y === ey && m <= em)) {
         buckets.push(`${y}-${String(m).padStart(2, '0')}`);
         m++;
-        if (m > 12) { m = 1; y++; }
+        if (m > 12) {
+          m = 1;
+          y++;
+        }
       }
     }
 
     // Initialize series: each bucket starts with 0 for every category.
     const seriesMap = {};
-    buckets.forEach(b => {
+    buckets.forEach((b) => {
       const obj = { period: b };
-      resolvedIds.forEach(id => { obj[`cat_${id}`] = 0; });
+      resolvedIds.forEach((id) => {
+        obj[`cat_${id}`] = 0;
+      });
       seriesMap[b] = obj;
     });
 
     // Aggregate amounts into buckets.
-    txs.forEach(t => {
-      const key = granularity === 'day' ? t.date : String(t.date || '').slice(0, 7);
+    txs.forEach((t) => {
+      const key =
+        granularity === 'day' ? t.date : String(t.date || '').slice(0, 7);
       if (!seriesMap[key]) return;
       for (const catKey of seriesKeysFor.get(t.CategoryId) || []) {
         seriesMap[key][catKey] += Number(t.amount);
       }
     });
 
-    const series = buckets.map(b => seriesMap[b]);
-    const categories = cats.map(c => ({ id: c.id, name: c.name, color: c.color, type: c.type, parentId: c.parentId }));
+    const series = buckets.map((b) => seriesMap[b]);
+    const categories = cats.map((c) => ({
+      id: c.id,
+      name: c.name,
+      color: c.color,
+      type: c.type,
+      parentId: c.parentId,
+    }));
 
     res.json({ granularity, series, categories });
   } catch (e) {
@@ -242,7 +338,8 @@ router.get('/export', async (req, res) => {
   try {
     const { period, from, to } = req.query;
     const where = { UserId: req.userId };
-    let selMonth = null, selYear = null;
+    let selMonth = null,
+      selYear = null;
     if (from && to) {
       where.date = { [Op.between]: [from, to] };
     } else if (period && period !== 'all') {
@@ -251,8 +348,10 @@ router.get('/export', async (req, res) => {
         where.date = { [Op.between]: [`${selYear}-01-01`, `${selYear}-12-31`] };
       } else {
         const parts = String(period).split('-');
-        selYear = Number(parts[0]); selMonth = Number(parts[1]);
-        if (!selYear || !selMonth) return res.status(400).json({ message: 'Invalid period' });
+        selYear = Number(parts[0]);
+        selMonth = Number(parts[1]);
+        if (!selYear || !selMonth)
+          return res.status(400).json({ message: 'Invalid period' });
         const start = `${selYear}-${String(selMonth).padStart(2, '0')}-01`;
         const end = `${selYear}-${String(selMonth).padStart(2, '0')}-${String(new Date(selYear, selMonth, 0).getDate()).padStart(2, '0')}`;
         where.date = { [Op.between]: [start, end] };
@@ -264,13 +363,21 @@ router.get('/export', async (req, res) => {
     if (excludeFrag) Object.assign(where, excludeFrag);
 
     // Load transactions
-    const loaded = await Transaction.findAll({ where, include: [{ model: Category, include: [{ model: Category, as: 'parent' }] }, Card] });
+    const loaded = await Transaction.findAll({
+      where,
+      include: [
+        { model: Category, include: [{ model: Category, as: 'parent' }] },
+        Card,
+      ],
+    });
     // The Transactions sheet lists everything; totals and breakdowns skip transfers.
-    const txs = loaded.filter(t => t.Category?.type !== 'transfer');
-    const exportCategories = await Category.findAll({ where: { UserId: req.userId } });
+    const txs = loaded.filter((t) => t.Category?.type !== 'transfer');
+    const exportCategories = await Category.findAll({
+      where: { UserId: req.userId },
+    });
 
     // Transactions sheet
-    const transactionRows = loaded.map(t => ({
+    const transactionRows = loaded.map((t) => ({
       Type: t.Category?.type === 'transfer' ? 'transfer' : t.type,
       Description: t.description,
       Category: t.Category?.name || '',
@@ -278,60 +385,84 @@ router.get('/export', async (req, res) => {
       Amount: Number(t.amount),
       Date: t.date,
       PaymentMethod: t.paymentMethod,
-      Card: t.Card?.name || ''
+      Card: t.Card?.name || '',
     }));
 
     // Overview metrics
-    const income = txs.filter(t => t.type === 'income').reduce((a, b) => a + Number(b.amount), 0);
-    const expense = txs.filter(t => t.type === 'expense').reduce((a, b) => a + Number(b.amount), 0);
+    const income = txs
+      .filter((t) => t.type === 'income')
+      .reduce((a, b) => a + Number(b.amount), 0);
+    const expense = txs
+      .filter((t) => t.type === 'expense')
+      .reduce((a, b) => a + Number(b.amount), 0);
     const overviewRows = [
       { Metric: 'Income', Value: income },
       { Metric: 'Expense', Value: expense },
       { Metric: 'Transactions', Value: txs.length },
-      { Metric: 'Balance', Value: income - expense }
+      { Metric: 'Balance', Value: income - expense },
     ];
 
     // Income vs Expenses by month
     const monthMap = {};
-    txs.forEach(t => {
+    txs.forEach((t) => {
       const key = (t.date || '').slice(0, 7); // YYYY-MM
       if (!key) return;
       if (!monthMap[key]) monthMap[key] = { Month: key, Income: 0, Expense: 0 };
       if (t.type === 'income') monthMap[key].Income += Number(t.amount);
       else if (t.type === 'expense') monthMap[key].Expense += Number(t.amount);
     });
-    const incomeVsExpenseRows = Object.values(monthMap).sort((a, b) => a.Month.localeCompare(b.Month));
+    const incomeVsExpenseRows = Object.values(monthMap).sort((a, b) =>
+      a.Month.localeCompare(b.Month),
+    );
 
     // Category totals (expenses only)
-    const categoryRows = groupByParent(txs, exportCategories, 'expense', '').flatMap(g => [
+    const categoryRows = groupByParent(
+      txs,
+      exportCategories,
+      'expense',
+      '',
+    ).flatMap((g) => [
       { Category: g.name, ParentCategory: '', Amount: g.amount },
-      ...g.children.map(c => ({ Category: c.name, ParentCategory: g.name, Amount: c.amount })),
+      ...g.children.map((c) => ({
+        Category: c.name,
+        ParentCategory: g.name,
+        Amount: c.amount,
+      })),
     ]);
 
     // Per card totals (expenses only)
     const perCardMap = {};
-    txs.filter(t => t.paymentMethod === 'card' && t.type === 'expense').forEach(t => {
-      const name = t.Card?.name || 'Unknown';
-      perCardMap[name] = (perCardMap[name] || 0) + Number(t.amount);
-    });
-    const perCardRows = Object.entries(perCardMap).map(([Card, Amount]) => ({ Card, Amount }));
+    txs
+      .filter((t) => t.paymentMethod === 'card' && t.type === 'expense')
+      .forEach((t) => {
+        const name = t.Card?.name || 'Unknown';
+        perCardMap[name] = (perCardMap[name] || 0) + Number(t.amount);
+      });
+    const perCardRows = Object.entries(perCardMap).map(([Card, Amount]) => ({
+      Card,
+      Amount,
+    }));
 
     // Budget vs Actual (only for a specific month)
     let budgetRows = [];
     if (selMonth && selYear) {
-      const budgetItem = await Budget.findOne({ where: { UserId: req.userId, month: selMonth, year: selYear } });
+      const budgetItem = await Budget.findOne({
+        where: { UserId: req.userId, month: selMonth, year: selYear },
+      });
       const budgetAmount = Number(budgetItem?.amount || 0);
       const actual = expense; // expenses already filtered for selected period
       const remaining = budgetAmount - actual;
-      const consumedRatio = budgetAmount > 0 ? (actual / budgetAmount) : 0;
+      const consumedRatio = budgetAmount > 0 ? actual / budgetAmount : 0;
       budgetRows = [
         { Metric: 'Budget', Value: budgetAmount },
         { Metric: 'Actual (Expense)', Value: actual },
         { Metric: 'Remaining', Value: remaining },
-        { Metric: 'Consumed %', Value: consumedRatio }
+        { Metric: 'Consumed %', Value: consumedRatio },
       ];
     } else {
-      budgetRows = [{ Note: 'Budget vs Actual is only available for a specific month.' }];
+      budgetRows = [
+        { Note: 'Budget vs Actual is only available for a specific month.' },
+      ];
     }
 
     // Build workbook with multiple sheets using ExcelJS with styling
@@ -349,23 +480,31 @@ router.get('/export', async (req, res) => {
     };
 
     // Transactions
-    const wsTransactions = createSheet('Transactions', [
-      { header: 'Type', key: 'Type', width: 12 },
-      { header: 'Description', key: 'Description', width: 32 },
-      { header: 'Category', key: 'Category', width: 18 },
-      { header: 'ParentCategory', key: 'ParentCategory', width: 18 },
-      { header: 'Amount', key: 'Amount', width: 14 },
-      { header: 'Date', key: 'Date', width: 12 },
-      { header: 'PaymentMethod', key: 'PaymentMethod', width: 16 },
-      { header: 'Card', key: 'Card', width: 16 },
-    ], transactionRows);
+    const wsTransactions = createSheet(
+      'Transactions',
+      [
+        { header: 'Type', key: 'Type', width: 12 },
+        { header: 'Description', key: 'Description', width: 32 },
+        { header: 'Category', key: 'Category', width: 18 },
+        { header: 'ParentCategory', key: 'ParentCategory', width: 18 },
+        { header: 'Amount', key: 'Amount', width: 14 },
+        { header: 'Date', key: 'Date', width: 12 },
+        { header: 'PaymentMethod', key: 'PaymentMethod', width: 16 },
+        { header: 'Card', key: 'Card', width: 16 },
+      ],
+      transactionRows,
+    );
     wsTransactions.getColumn('Amount').numFmt = '0.00';
 
     // Overview
-    const wsOverview = createSheet('Overview', [
-      { header: 'Metric', key: 'Metric', width: 20 },
-      { header: 'Value', key: 'Value', width: 16 },
-    ], overviewRows);
+    const wsOverview = createSheet(
+      'Overview',
+      [
+        { header: 'Metric', key: 'Metric', width: 20 },
+        { header: 'Value', key: 'Value', width: 16 },
+      ],
+      overviewRows,
+    );
     // Apply number format to Value column
     for (let r = 2; r <= wsOverview.rowCount; r++) {
       const metric = wsOverview.getCell(r, 1).value;
@@ -374,27 +513,39 @@ router.get('/export', async (req, res) => {
     }
 
     // Income vs Expenses
-    const wsIncomeVsExpense = createSheet('IncomeVsExpenses', [
-      { header: 'Month', key: 'Month', width: 10 },
-      { header: 'Income', key: 'Income', width: 14 },
-      { header: 'Expense', key: 'Expense', width: 14 },
-    ], incomeVsExpenseRows);
+    const wsIncomeVsExpense = createSheet(
+      'IncomeVsExpenses',
+      [
+        { header: 'Month', key: 'Month', width: 10 },
+        { header: 'Income', key: 'Income', width: 14 },
+        { header: 'Expense', key: 'Expense', width: 14 },
+      ],
+      incomeVsExpenseRows,
+    );
     wsIncomeVsExpense.getColumn('Income').numFmt = '0.00';
     wsIncomeVsExpense.getColumn('Expense').numFmt = '0.00';
 
     // Categories
-    const wsCategories = createSheet('Categories', [
-      { header: 'Category', key: 'Category', width: 18 },
-      { header: 'ParentCategory', key: 'ParentCategory', width: 18 },
-      { header: 'Amount', key: 'Amount', width: 14 },
-    ], categoryRows);
+    const wsCategories = createSheet(
+      'Categories',
+      [
+        { header: 'Category', key: 'Category', width: 18 },
+        { header: 'ParentCategory', key: 'ParentCategory', width: 18 },
+        { header: 'Amount', key: 'Amount', width: 14 },
+      ],
+      categoryRows,
+    );
     wsCategories.getColumn('Amount').numFmt = '0.00';
 
     // Budget vs Actual
-    const wsBudget = createSheet('BudgetVsActual', [
-      { header: 'Metric', key: 'Metric', width: 24 },
-      { header: 'Value', key: 'Value', width: 16 },
-    ], budgetRows);
+    const wsBudget = createSheet(
+      'BudgetVsActual',
+      [
+        { header: 'Metric', key: 'Metric', width: 24 },
+        { header: 'Value', key: 'Value', width: 16 },
+      ],
+      budgetRows,
+    );
     for (let r = 2; r <= wsBudget.rowCount; r++) {
       const metric = wsBudget.getCell(r, 1).value;
       const cell = wsBudget.getCell(r, 2);
@@ -405,22 +556,218 @@ router.get('/export', async (req, res) => {
     }
 
     // Per Card
-    const wsPerCard = createSheet('PerCard', [
-      { header: 'Card', key: 'Card', width: 18 },
-      { header: 'Amount', key: 'Amount', width: 14 },
-    ], perCardRows);
+    const wsPerCard = createSheet(
+      'PerCard',
+      [
+        { header: 'Card', key: 'Card', width: 18 },
+        { header: 'Amount', key: 'Amount', width: 14 },
+      ],
+      perCardRows,
+    );
     wsPerCard.getColumn('Amount').numFmt = '0.00';
 
     const buf = await wb.xlsx.writeBuffer();
-    const filename = (from && to)
-      ? `transactions_${from}_to_${to}.xlsx`
-      : (selYear && selMonth)
-        ? `transactions_${String(selYear)}-${String(selMonth).padStart(2, '00')}.xlsx`
-        : 'transactions_all.xlsx';
+    const filename =
+      from && to
+        ? `transactions_${from}_to_${to}.xlsx`
+        : selYear && selMonth
+          ? `transactions_${String(selYear)}-${String(selMonth).padStart(2, '00')}.xlsx`
+          : 'transactions_all.xlsx';
     res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
     res.send(Buffer.from(buf));
   } catch (e) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ── Category budgets ────────────────────────────────────────────────────────
+// Same rules as the dashboard: a parent counts its subcategories' spending and,
+// without a budget of its own, uses the sum of theirs. Isolated accounts and
+// transfers stay out.
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function monthBounds(period) {
+  if (!/^\d{4}-\d{2}$/.test(String(period || ''))) return null;
+  const [year, month] = period.split('-').map(Number);
+  if (month < 1 || month > 12) return null;
+  const days = new Date(year, month, 0).getDate();
+  return {
+    period,
+    year,
+    month,
+    days,
+    start: `${period}-01`,
+    end: `${period}-${pad2(days)}`,
+  };
+}
+
+const previousOf = ({ year, month }) =>
+  monthBounds(month === 1 ? `${year - 1}-12` : `${year}-${pad2(month - 1)}`);
+
+const currentPeriod = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+};
+
+const budgetOf = (c) =>
+  c.monthlyBudget != null ? Number(c.monthlyBudget) : null;
+
+function effectiveBudget(category, all) {
+  const own = budgetOf(category);
+  if (own != null || category.parentId) return own;
+  const children = all.filter(
+    (c) => c.parentId === category.id && budgetOf(c) != null,
+  );
+  return children.length
+    ? children.reduce((sum, c) => sum + budgetOf(c), 0)
+    : null;
+}
+
+async function expenseRows(userId, bounds, categoryIds) {
+  const where = {
+    UserId: userId,
+    type: 'expense',
+    date: { [Op.between]: [bounds.start, bounds.end] },
+    ...(categoryIds ? { CategoryId: categoryIds } : {}),
+  };
+  const excludeFrag = await excludeIsolatedAccounts(userId);
+  if (excludeFrag) Object.assign(where, excludeFrag);
+  return Transaction.findAll({
+    where,
+    attributes: ['CategoryId', 'amount', 'date'],
+    raw: true,
+  });
+}
+
+// GET /api/stats/category-budgets?period=YYYY-MM
+router.get('/category-budgets', async (req, res) => {
+  try {
+    const bounds = monthBounds(req.query.period || currentPeriod());
+    if (!bounds) return res.status(400).json({ message: 'Invalid period' });
+    const all = await Category.findAll({
+      where: { UserId: req.userId, type: 'expense' },
+    });
+    const rows = await expenseRows(req.userId, bounds);
+    const spentBy = new Map();
+    for (const r of rows)
+      spentBy.set(
+        r.CategoryId,
+        (spentBy.get(r.CategoryId) || 0) + Number(r.amount),
+      );
+    const round = (n) => Math.round(n * 100) / 100;
+
+    const items = [];
+    for (const parent of all.filter((c) => !c.parentId)) {
+      const children = all.filter((c) => c.parentId === parent.id);
+      const budget = effectiveBudget(parent, all);
+      const childRows = children
+        .filter((c) => budgetOf(c) != null)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          budget: budgetOf(c),
+          spent: round(spentBy.get(c.id) || 0),
+        }));
+      if (budget == null && childRows.length === 0) continue;
+      const spent = [parent, ...children].reduce(
+        (sum, c) => sum + (spentBy.get(c.id) || 0),
+        0,
+      );
+      items.push({
+        id: parent.id,
+        name: parent.name,
+        color: parent.color,
+        budget,
+        spent: round(spent),
+        children: childRows,
+      });
+    }
+    items.sort(
+      (a, b) =>
+        (b.budget ? b.spent / b.budget : 0) -
+        (a.budget ? a.spent / a.budget : 0),
+    );
+    res.json({ period: bounds.period, items });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /api/stats/category-budget/:id?period=YYYY-MM
+// Cumulative spending per day of the month, next to the previous month's.
+router.get('/category-budget/:id', async (req, res) => {
+  try {
+    const bounds = monthBounds(req.query.period || currentPeriod());
+    if (!bounds) return res.status(400).json({ message: 'Invalid period' });
+    const category = await Category.findOne({
+      where: { id: req.params.id, UserId: req.userId },
+    });
+    if (!category || category.type !== 'expense')
+      return res.status(404).json({ message: 'Not found' });
+    const all = await Category.findAll({
+      where: { UserId: req.userId, type: 'expense' },
+    });
+    const ids = [
+      category.id,
+      ...(category.parentId
+        ? []
+        : all.filter((c) => c.parentId === category.id).map((c) => c.id)),
+    ];
+    const prev = previousOf(bounds);
+
+    const cumulative = async (b) => {
+      const perDay = new Array(b.days + 1).fill(0);
+      for (const r of await expenseRows(req.userId, b, ids)) {
+        perDay[Number(String(r.date).slice(8, 10))] += Number(r.amount);
+      }
+      let running = 0;
+      return perDay.map((v) => Math.round((running += v) * 100) / 100);
+    };
+    const [current, previous] = await Promise.all([
+      cumulative(bounds),
+      cumulative(prev),
+    ]);
+
+    // Days still to come in the running month have no spending line yet.
+    const now = currentPeriod();
+    const lastDay =
+      bounds.period < now
+        ? bounds.days
+        : bounds.period === now
+          ? new Date().getDate()
+          : 0;
+    const series = Array.from({ length: bounds.days }, (_, i) => {
+      const day = i + 1;
+      return {
+        day,
+        spent: day <= lastDay ? current[day] : null,
+        previous: previous[Math.min(day, prev.days)],
+      };
+    });
+
+    res.json({
+      category: {
+        id: category.id,
+        name: category.name,
+        color: category.color,
+        parentId: category.parentId,
+      },
+      period: bounds.period,
+      previousPeriod: prev.period,
+      budget: effectiveBudget(category, all),
+      spent: current[bounds.days],
+      previousSpent: previous[prev.days],
+      series,
+    });
+  } catch (e) {
+    console.error(e);
     res.status(500).json({ message: 'Server error' });
   }
 });
