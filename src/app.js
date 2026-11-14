@@ -13,6 +13,7 @@ import scheduledPaymentsRoutes from './routes/scheduledPayments.js';
 import adminRoutes from './routes/admin.js';
 import investmentsRoutes from './routes/investments.js';
 import rulesRoutes from './routes/rules.js';
+import importRoutes from './routes/import.js';
 
 // Separate from index.js so tests can mount the API without listening or booting the DB.
 export const app = express();
@@ -33,3 +34,4 @@ app.use('/api/scheduled-payments', scheduledPaymentsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/investments', investmentsRoutes);
 app.use('/api/rules', rulesRoutes);
+app.use('/api/import', importRoutes);
