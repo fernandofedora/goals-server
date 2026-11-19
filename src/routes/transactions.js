@@ -4,12 +4,46 @@ import { authMiddleware } from '../middleware/auth.js';
 import { withChildIds } from '../utils/categoryTree.js';
 import { checkBudgetThresholds } from '../services/budgetAlerts.js';
 import { applyRules } from '../utils/categoryRules.js';
-import { Transaction, Category, Card, Account } from '../models/index.js';
+import {
+  Transaction,
+  Category,
+  Card,
+  Account,
+  Tag,
+  TransactionTag,
+} from '../models/index.js';
 
 const router = express.Router();
 router.use(authMiddleware);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_TAGS_PER_TX = 10;
+
+const TAG_INCLUDE = {
+  model: Tag,
+  attributes: ['id', 'name', 'color'],
+  through: { attributes: [] },
+};
+
+/**
+ * The user's tags named in `tagIds`. undefined = not sent (leave the tags
+ * alone); anything that is not a list of the user's own tag ids is an error.
+ */
+async function resolveTags(userId, tagIds) {
+  if (tagIds === undefined) return { tags: null };
+  const valid =
+    Array.isArray(tagIds) &&
+    tagIds.length <= MAX_TAGS_PER_TX &&
+    tagIds.every((id) => Number.isInteger(id) && id > 0);
+  if (!valid) return { error: true };
+  const unique = [...new Set(tagIds)];
+  const tags = unique.length
+    ? await Tag.findAll({ where: { id: unique, UserId: userId } })
+    : [];
+  return tags.length === unique.length ? { tags } : { error: true };
+}
+const tagError = (res) =>
+  res.status(400).json({ code: 'TAGS_INVALID', message: 'Etiquetas no válidas' });
 const MAX_BULK_IDS = 500;
 
 const parseIds = (ids) =>
@@ -143,6 +177,22 @@ router.get('/', async (req, res) => {
   if (req.query.categoryId) {
     where.CategoryId = await withChildIds(req.userId, req.query.categoryId);
   }
+  if (req.query.tagId) {
+    if (!/^\d+$/.test(String(req.query.tagId))) {
+      return res.status(400).json({ message: 'Invalid tagId' });
+    }
+    const tag = await Tag.findOne({
+      where: { id: req.query.tagId, UserId: req.userId },
+    });
+    const links = tag
+      ? await TransactionTag.findAll({
+          where: { TagId: tag.id },
+          attributes: ['TransactionId'],
+          raw: true,
+        })
+      : [];
+    where.id = links.map((l) => l.TransactionId);
+  }
 
   // General history (no specific card/account requested): hide transactions of
   // isolated ("no integrar") accounts, but keep account-less ones (cash/card).
@@ -167,6 +217,7 @@ router.get('/', async (req, res) => {
       { model: Category, attributes: { exclude: ['UserId'] } },
       { model: Card, attributes: { exclude: ['UserId'] } },
       { model: Account, attributes: { exclude: ['UserId'] } },
+      TAG_INCLUDE,
     ],
     // id breaks ties so rows of the same day never repeat across pages.
     order: [
@@ -183,6 +234,9 @@ router.get('/', async (req, res) => {
     const offset = (pageInt - 1) * limitInt;
     const { rows, count } = await Transaction.findAndCountAll({
       ...commonOptions,
+      // Tags join several rows per transaction; count transactions, not joins.
+      distinct: true,
+      col: 'id',
       offset,
       limit: limitInt,
     });
@@ -286,6 +340,8 @@ router.post('/', async (req, res) => {
     cardId,
     accountId,
   } = req.body;
+  const { tags, error: badTags } = await resolveTags(req.userId, req.body.tagIds);
+  if (badTags) return tagError(res);
   // Without a category, the user's rules may pick one.
   const ruledCategoryId = categoryId
     ? null
@@ -301,6 +357,7 @@ router.post('/', async (req, res) => {
     CardId: cardId || null,
     AccountId: accountId || null,
   });
+  if (tags?.length) await item.setTags(tags);
   alertIfExpense(req.userId, item);
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
@@ -308,6 +365,7 @@ router.post('/', async (req, res) => {
       { model: Category, attributes: { exclude: ['UserId'] } },
       { model: Card, attributes: { exclude: ['UserId'] } },
       { model: Account, attributes: { exclude: ['UserId'] } },
+      TAG_INCLUDE,
     ],
   });
   res.json(full);
@@ -328,6 +386,8 @@ router.put('/:id', async (req, res) => {
     cardId,
     accountId,
   } = req.body;
+  const { tags, error: badTags } = await resolveTags(req.userId, req.body.tagIds);
+  if (badTags) return tagError(res);
   await item.update({
     type,
     description,
@@ -338,6 +398,7 @@ router.put('/:id', async (req, res) => {
     CardId: cardId || null,
     AccountId: accountId || null,
   });
+  if (tags) await item.setTags(tags);
   alertIfExpense(req.userId, item);
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
@@ -345,6 +406,7 @@ router.put('/:id', async (req, res) => {
       { model: Category, attributes: { exclude: ['UserId'] } },
       { model: Card, attributes: { exclude: ['UserId'] } },
       { model: Account, attributes: { exclude: ['UserId'] } },
+      TAG_INCLUDE,
     ],
   });
   res.json(full);

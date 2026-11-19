@@ -7,6 +7,7 @@ import {
   Budget,
   Account,
   User,
+  Tag,
 } from '../models/index.js';
 import ExcelJS from 'exceljs';
 import { groupByParent } from '../utils/categoryTree.js';
@@ -370,6 +371,7 @@ router.get('/export', async (req, res) => {
       include: [
         { model: Category, include: [{ model: Category, as: 'parent' }] },
         Card,
+        { model: Tag, attributes: ['name'], through: { attributes: [] } },
       ],
     });
     // The Transactions sheet lists everything; totals and breakdowns skip transfers.
@@ -384,6 +386,7 @@ router.get('/export', async (req, res) => {
       Description: t.description,
       Category: t.Category?.name || '',
       ParentCategory: t.Category?.parent?.name || '',
+      Tags: (t.Tags || []).map((tag) => tag.name).join(', '),
       Amount: Number(t.amount),
       Date: t.date,
       PaymentMethod: t.paymentMethod,
@@ -493,6 +496,7 @@ router.get('/export', async (req, res) => {
         { header: 'Date', key: 'Date', width: 12 },
         { header: 'PaymentMethod', key: 'PaymentMethod', width: 16 },
         { header: 'Card', key: 'Card', width: 16 },
+        { header: 'Tags', key: 'Tags', width: 24 },
       ],
       transactionRows,
     );
@@ -582,6 +586,48 @@ router.get('/export', async (req, res) => {
     );
     res.send(Buffer.from(buf));
   } catch (e) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ── Top tags ─────────────────────────────────────────────────────────────────
+// GET /api/stats/top-tags?days=30: spending per tag, biggest first. A
+// transaction with two tags counts for both; transfers and isolated accounts
+// stay out, like everywhere else.
+router.get('/top-tags', async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const end = new Date();
+    const start = new Date(end.getFullYear(), end.getMonth(), end.getDate() - (days - 1));
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const where = { UserId: req.userId, type: 'expense', date: { [Op.between]: [iso(start), iso(end)] } };
+    const excludeFrag = await excludeIsolatedAccounts(req.userId);
+    if (excludeFrag) Object.assign(where, excludeFrag);
+    const txs = await Transaction.findAll({
+      where,
+      attributes: ['id', 'amount'],
+      include: [
+        { model: Category, attributes: ['type'] },
+        { model: Tag, attributes: ['id', 'name', 'color'], through: { attributes: [] }, required: true },
+      ],
+    });
+    const byTag = new Map();
+    for (const t of txs) {
+      if (t.Category?.type === 'transfer') continue;
+      for (const tag of t.Tags) {
+        const row = byTag.get(tag.id) || { tagId: tag.id, name: tag.name, color: tag.color, amount: 0, count: 0 };
+        row.amount += Number(t.amount);
+        row.count += 1;
+        byTag.set(tag.id, row);
+      }
+    }
+    const items = [...byTag.values()]
+      .map((r) => ({ ...r, amount: Math.round(r.amount * 100) / 100 }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+    res.json({ days, from: iso(start), to: iso(end), items });
+  } catch (e) {
+    console.error(e);
     res.status(500).json({ message: 'Server error' });
   }
 });

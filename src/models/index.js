@@ -178,6 +178,19 @@ export const NetWorthSnapshot = sequelize.define(
 
 // "If the description contains UBER, use Transporte": the first active rule by
 // priority that matches picks the category (see utils/categoryRules.js).
+// Free labels that cut across categories ("viaje-2026", "boda"). A transaction
+// can carry several; names are unique per user, ignoring case.
+export const Tag = sequelize.define('Tag', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING(40), allowNull: false },
+  color: { type: DataTypes.STRING(9), allowNull: false, defaultValue: '#64748b' },
+});
+export const TransactionTag = sequelize.define(
+  'TransactionTag',
+  {},
+  { timestamps: false },
+);
+
 export const CategoryRule = sequelize.define('CategoryRule', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING(80), allowNull: false },
@@ -351,6 +364,10 @@ CategoryRule.belongsTo(Category);
 Category.belongsTo(Category, { as: 'parent', foreignKey: 'parentId' });
 Category.hasMany(Category, { as: 'children', foreignKey: 'parentId' });
 Transaction.belongsTo(Category);
+User.hasMany(Tag, { onDelete: 'CASCADE' });
+Tag.belongsTo(User);
+Transaction.belongsToMany(Tag, { through: TransactionTag, onDelete: 'CASCADE' });
+Tag.belongsToMany(Transaction, { through: TransactionTag, onDelete: 'CASCADE' });
 Card.hasMany(Transaction);
 Transaction.belongsTo(Card);
 User.hasMany(Budget);
