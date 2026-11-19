@@ -17,10 +17,12 @@ import {
   formatSymbol,
   toAssetType,
 } from '../services/marketData/index.js';
-import { getRate, getRatesDate } from '../services/fx.js';
+import { getRatesDate } from '../services/fx.js';
+import { costInUserCurrency, resolveFx } from '../services/portfolio.js';
 
 // Experimental investments module. Independent by design: it never touches
-// Transactions, Accounts, Cards, Categories or stats.
+// Transactions, Accounts, Cards or Categories. The net worth (stats) only reads
+// its value through services/portfolio.js.
 const router = express.Router();
 // Closed beta: only super admins and users they granted access (see auth.js).
 router.use(authMiddleware, investmentsAccessMiddleware);
@@ -101,13 +103,6 @@ function buildPurchase(body, { fxRate, userCurrency, fallbackPrice }) {
 
 // FX from the asset's currency to the user's. If the user's currency is unknown
 // to the FX source, everything stays in the asset's currency.
-async function resolveFx(quoteCurrency, userCurrency) {
-  const rate = await getRate(quoteCurrency, userCurrency);
-  return rate
-    ? { fxRate: rate, currency: userCurrency, fxUnavailable: false }
-    : { fxRate: 1, currency: quoteCurrency, fxUnavailable: true };
-}
-
 const formatPurchase = (p) => ({
   id: p.id,
   date: p.date,
@@ -209,16 +204,7 @@ router.get('/', async (req, res) => {
 
     const shares = purchases.reduce((s, p) => s + Number(p.shares), 0);
     const costQuote = purchases.reduce((s, p) => s + Number(p.amountQuote), 0);
-    // Purchases recorded in the user's current currency keep their historical
-    // FX; older ones (user changed currency since) are converted at today's rate.
-    const costUser = purchases.reduce(
-      (s, p) =>
-        s +
-        (p.userCurrency === fx.currency
-          ? Number(p.amountUser)
-          : Number(p.amountQuote) * fx.fxRate),
-      0,
-    );
+    const costUser = costInUserCurrency(purchases, fx);
     const valueQuote = quote ? shares * quote.price : null;
     const valueUser = valueQuote != null ? valueQuote * fx.fxRate : null;
     const gainUser = valueUser != null ? valueUser - costUser : null;

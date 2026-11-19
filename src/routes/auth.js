@@ -2,14 +2,15 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { User, Category } from '../models/index.js';
+import { User } from '../models/index.js';
+import { addSuggestedCategories } from '../utils/categoryCatalog.js';
 import { sendVerificationEmail, sendResetPasswordEmail } from '../utils/mail.js';
 
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, language } = req.body;
     const existing = await User.findOne({ where: { email } });
     if (existing) return res.status(400).json({ message: 'El correo electrónico ya está registrado' });
     
@@ -21,20 +22,13 @@ router.post('/register', async (req, res) => {
       email, 
       passwordHash,
       isEmailVerified: false,
-      verificationToken
+      verificationToken,
+      // The categories catalog is created in this language.
+      ...(['es', 'en'].includes(language) ? { language } : {}),
     });
 
     try {
-      const defaults = [
-        { name: 'Housing', color: '#8b5cf6', type: 'expense', UserId: user.id },
-        { name: 'Food', color: '#f59e0b', type: 'expense', UserId: user.id },
-        { name: 'Transportation', color: '#3b82f6', type: 'expense', UserId: user.id },
-        { name: 'Utilities', color: '#06b6d4', type: 'expense', UserId: user.id },
-        { name: 'Entertainment', color: '#ec4899', type: 'expense', UserId: user.id },
-        { name: 'Healthcare', color: '#10b981', type: 'expense', UserId: user.id },
-        { name: 'Salary', color: '#10b981', type: 'income', UserId: user.id }
-      ];
-      await Category.bulkCreate(defaults);
+      await addSuggestedCategories(user.id, user.language);
     } catch (err) {
       console.error('Failed to create default categories for new user:', err);
     }
