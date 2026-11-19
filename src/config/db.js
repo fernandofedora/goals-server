@@ -33,6 +33,33 @@ export const connectDB = async () => {
     // Link materialized transactions back to their ScheduledPayment so a unique
     // (ScheduledPaymentId, date) index can make duplicate materialization of the
     // same occurrence physically impossible (see cron.js).
+    if (!descTrans.importBatchId) {
+      await qi.addColumn('Transactions', 'importBatchId', {
+        type: DataTypes.STRING(36),
+        allowNull: true,
+      });
+      await qi.addIndex('Transactions', ['UserId', 'importBatchId'], {
+        name: 'tx_import_batch',
+      });
+      console.log('Migration: added Transactions.importBatchId column');
+    }
+    if (!descTrans.isSplitContainer) {
+      await qi.addColumn('Transactions', 'isSplitContainer', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
+      console.log('Migration: added Transactions.isSplitContainer column');
+    }
+    if (!descTrans.splitOfId) {
+      await qi.addColumn('Transactions', 'splitOfId', {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+      });
+      await qi.addIndex('Transactions', ['splitOfId'], { name: 'tx_split_of' });
+      console.log('Migration: added Transactions.splitOfId column');
+    }
     if (!descTrans.ScheduledPaymentId) {
       await qi.addColumn('Transactions', 'ScheduledPaymentId', {
         type: DataTypes.INTEGER,
@@ -123,6 +150,38 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Categories.monthlyBudget column');
     }
+    if (!descCats.parentId) {
+      await qi.addColumn('Categories', 'parentId', {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+      });
+      console.log('Migration: added Categories.parentId column');
+    }
+    // Expand Categories.type ENUM to include 'transfer'.
+    if (descCats.type && !String(descCats.type.type).includes('transfer')) {
+      await sequelize.query(
+        "ALTER TABLE `Categories` MODIFY COLUMN `type` ENUM('expense','income','transfer') NOT NULL",
+      );
+      console.log('Migration: Categories.type ENUM expanded to include transfer');
+    }
+    const descPlans = await qi.describeTable('SavingsPlans').catch(() => ({}));
+    if (!descPlans.targetDate) {
+      await qi.addColumn('SavingsPlans', 'targetDate', {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        defaultValue: null,
+      });
+      console.log('Migration: added SavingsPlans.targetDate column');
+    }
+    if (!descPlans.initialAmount) {
+      await qi.addColumn('SavingsPlans', 'initialAmount', {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+        defaultValue: 0,
+      });
+      console.log('Migration: added SavingsPlans.initialAmount column');
+    }
     // Add isExcludedFromTotals to Accounts (cuentas "no integrar" / aisladas)
     const descAccts = await qi.describeTable('Accounts').catch(() => ({}));
     if (!descAccts.isExcludedFromTotals) {
@@ -151,6 +210,17 @@ export const connectDB = async () => {
         defaultValue: false,
       });
       console.log('Migration: added Cards.isHidden column');
+    }
+    const cardColumns = {
+      creditLimit: { type: DataTypes.DECIMAL(16, 2), allowNull: true, defaultValue: null },
+      statementDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+      dueDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+    };
+    for (const [name, definition] of Object.entries(cardColumns)) {
+      if (!descCardCols[name]) {
+        await qi.addColumn('Cards', name, definition);
+        console.log(`Migration: added Cards.${name} column`);
+      }
     }
 
     const desc = await qi.describeTable('Users').catch(() => ({}));
@@ -236,6 +306,14 @@ export const connectDB = async () => {
         defaultValue: false,
       });
       console.log('Migration: added Users.canAccessInvestments column');
+    }
+    if (!desc.budgetAlertsEnabled) {
+      await qi.addColumn('Users', 'budgetAlertsEnabled', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      });
+      console.log('Migration: added Users.budgetAlertsEnabled column');
     }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query(

@@ -44,18 +44,31 @@ export const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: false,
   },
+  // Email when a category reaches 80% / 100% of its monthly budget.
+  budgetAlertsEnabled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
 });
 
 export const Category = sequelize.define('Category', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
   color: { type: DataTypes.STRING, allowNull: false, defaultValue: '#3b82f6' },
-  type: { type: DataTypes.ENUM('expense', 'income'), allowNull: false },
+  // 'transfer' moves money between own accounts: it changes balances but is
+  // left out of income, expense, budgets and category charts.
+  type: {
+    type: DataTypes.ENUM('expense', 'income', 'transfer'),
+    allowNull: false,
+  },
   monthlyBudget: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: true,
     defaultValue: null,
   },
+  // Subcategories: one level deep, see routes/categories.js.
+  parentId: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
 });
 
 export const Card = sequelize.define('Card', {
@@ -65,6 +78,11 @@ export const Card = sequelize.define('Card', {
   last4: { type: DataTypes.STRING, allowNull: false },
   // Hidden from the Accounts module (data and transactions are kept)
   isHidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Credit card details, all optional (see utils/cardCycle.js). With a limit
+  // set, the card's balance counts as debt in the net worth.
+  creditLimit: { type: DataTypes.DECIMAL(16, 2), allowNull: true, defaultValue: null },
+  statementDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+  dueDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
 });
 
 export const Transaction = sequelize.define('Transaction', {
@@ -82,6 +100,16 @@ export const Transaction = sequelize.define('Transaction', {
   // for manually-entered ones). A unique (ScheduledPaymentId, date) index makes
   // duplicate materialization of the same occurrence impossible. See cron.js.
   ScheduledPaymentId: { type: DataTypes.INTEGER, allowNull: true },
+  // Set on rows created by a file import, so the whole batch can be undone.
+  importBatchId: { type: DataTypes.STRING(36), allowNull: true },
+  // Split transactions (see routes/transactions.js): the original becomes a
+  // hidden container and its parts carry the categories and amounts.
+  isSplitContainer: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  splitOfId: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+}, {
+  // Every query sees the parts, never the container, so totals count a split
+  // purchase once. Code that needs the container calls Transaction.unscoped().
+  defaultScope: { where: { isSplitContainer: false } },
 });
 
 export const Budget = sequelize.define('Budget', {
@@ -101,6 +129,14 @@ export const SavingsPlan = sequelize.define('SavingsPlan', {
     defaultValue: 'active',
   },
   linkedCategoryId: { type: DataTypes.INTEGER, allowNull: true },
+  // Optional deadline; drives the on-track/behind status in routes/savings.js.
+  targetDate: { type: DataTypes.DATEONLY, allowNull: true, defaultValue: null },
+  // Saved before the plan existed; counts toward progress.
+  initialAmount: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+    defaultValue: 0,
+  },
 });
 
 export const SavingsContribution = sequelize.define('SavingsContribution', {
@@ -108,6 +144,115 @@ export const SavingsContribution = sequelize.define('SavingsContribution', {
   amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   date: { type: DataTypes.DATEONLY, allowNull: false },
   note: { type: DataTypes.STRING, allowNull: true },
+});
+
+// One row per alert sent, so each threshold is emailed once per category and month.
+export const BudgetAlertLog = sequelize.define(
+  'BudgetAlertLog',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    CategoryId: { type: DataTypes.INTEGER, allowNull: false },
+    year: { type: DataTypes.INTEGER, allowNull: false },
+    month: { type: DataTypes.INTEGER, allowNull: false },
+    threshold: { type: DataTypes.INTEGER, allowNull: false },
+  },
+  {
+    indexes: [
+      {
+        unique: true,
+        name: 'budget_alert_once',
+        fields: ['UserId', 'CategoryId', 'year', 'month', 'threshold'],
+      },
+    ],
+  },
+);
+
+// One row per user and month (date = last day of the month). The daily cron
+// keeps the running month up to date, so a closed month keeps its market value.
+export const NetWorthSnapshot = sequelize.define(
+  'NetWorthSnapshot',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    date: { type: DataTypes.DATEONLY, allowNull: false },
+    accounts: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+    investments: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+    debts: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+    total: { type: DataTypes.DECIMAL(16, 2), allowNull: false, defaultValue: 0 },
+  },
+  { indexes: [{ unique: true, name: 'net_worth_month', fields: ['UserId', 'date'] }] },
+);
+
+// "If the description contains UBER, use Transporte": the first active rule by
+// priority that matches picks the category (see utils/categoryRules.js).
+// Free labels that cut across categories ("viaje-2026", "boda"). A transaction
+// can carry several; names are unique per user, ignoring case.
+export const Tag = sequelize.define('Tag', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING(40), allowNull: false },
+  color: { type: DataTypes.STRING(9), allowNull: false, defaultValue: '#64748b' },
+});
+export const TransactionTag = sequelize.define(
+  'TransactionTag',
+  {},
+  { timestamps: false },
+);
+
+// Flexible budgets (see services/spendingBudgets.js): a name, an amount per
+// weekly, monthly or quarterly period starting on any day, and the categories
+// and tags whose spending counts. The catch-all one (one per user) takes the
+// spending no other budget covers. Replaces Category.monthlyBudget.
+export const SpendingBudget = sequelize.define('SpendingBudget', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING(60), allowNull: false },
+  amount: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+  periodType: {
+    type: DataTypes.ENUM('weekly', 'monthly', 'quarterly'),
+    allowNull: false,
+    defaultValue: 'monthly',
+  },
+  // Day of the month (1–31) for monthly and quarterly, weekday (1 = Monday) for weekly.
+  startDay: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  // Carry what was left (or overspent) into the next period.
+  rollover: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  isCatchAll: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  migratedFromCategoryId: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+});
+export const SpendingBudgetCategory = sequelize.define('SpendingBudgetCategory', {}, { timestamps: false });
+export const SpendingBudgetTag = sequelize.define('SpendingBudgetTag', {}, { timestamps: false });
+// One row per alert sent: each threshold once per budget and period.
+export const SpendingBudgetAlert = sequelize.define(
+  'SpendingBudgetAlert',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    SpendingBudgetId: { type: DataTypes.INTEGER, allowNull: false },
+    periodStart: { type: DataTypes.DATEONLY, allowNull: false },
+    threshold: { type: DataTypes.INTEGER, allowNull: false },
+  },
+  {
+    indexes: [
+      {
+        unique: true,
+        name: 'spending_budget_alert_once',
+        fields: ['SpendingBudgetId', 'periodStart', 'threshold'],
+      },
+    ],
+  },
+);
+
+export const CategoryRule = sequelize.define('CategoryRule', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING(80), allowNull: false },
+  field: { type: DataTypes.ENUM('description', 'amount'), allowNull: false },
+  operator: {
+    type: DataTypes.ENUM('contains', 'notContains', 'equals', 'startsWith', 'gt', 'lt'),
+    allowNull: false,
+  },
+  value: { type: DataTypes.STRING(100), allowNull: false },
+  priority: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 });
 
 export const Account = sequelize.define('Account', {
@@ -263,7 +408,23 @@ Card.belongsTo(User);
 User.hasMany(Transaction);
 Transaction.belongsTo(User);
 Category.hasMany(Transaction);
+User.hasMany(CategoryRule, { onDelete: 'CASCADE' });
+CategoryRule.belongsTo(User);
+Category.hasMany(CategoryRule, { onDelete: 'CASCADE' });
+CategoryRule.belongsTo(Category);
+Category.belongsTo(Category, { as: 'parent', foreignKey: 'parentId' });
+Category.hasMany(Category, { as: 'children', foreignKey: 'parentId' });
 Transaction.belongsTo(Category);
+User.hasMany(Tag, { onDelete: 'CASCADE' });
+Tag.belongsTo(User);
+Transaction.belongsToMany(Tag, { through: TransactionTag, onDelete: 'CASCADE' });
+User.hasMany(SpendingBudget, { onDelete: 'CASCADE' });
+SpendingBudget.belongsTo(User);
+SpendingBudget.belongsToMany(Category, { through: SpendingBudgetCategory, onDelete: 'CASCADE' });
+Category.belongsToMany(SpendingBudget, { through: SpendingBudgetCategory, onDelete: 'CASCADE' });
+SpendingBudget.belongsToMany(Tag, { through: SpendingBudgetTag, onDelete: 'CASCADE' });
+Tag.belongsToMany(SpendingBudget, { through: SpendingBudgetTag, onDelete: 'CASCADE' });
+Tag.belongsToMany(Transaction, { through: TransactionTag, onDelete: 'CASCADE' });
 Card.hasMany(Transaction);
 Transaction.belongsTo(Card);
 User.hasMany(Budget);

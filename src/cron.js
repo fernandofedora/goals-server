@@ -4,6 +4,8 @@ import { sequelize } from './config/db.js';
 import { ScheduledPayment, Transaction } from './models/index.js';
 import { syncCatalog } from './services/marketData/index.js';
 import { getRates } from './services/fx.js';
+import { checkBudgetThresholds } from './services/budgetAlerts.js';
+import { recordNetWorthSnapshots } from './services/netWorth.js';
 
 // Safety cap: never materialize more than this many occurrences for a single
 // payment in one catch-up pass, to guard against an unbounded loop on bad data.
@@ -22,10 +24,21 @@ function formatLocalDate(d) {
  * parses with a 'T00:00:00' suffix to force local-time parsing, then formats
  * back to 'YYYY-MM-DD'. Month/quarter/year roll-overs snap to the last valid
  * day of the target month (e.g. Jan 31 +1mo -> Feb 28/29; Feb 29 +1yr -> Feb 28).
+ * startDate restores the original day after a short month (Feb 28 -> Mar 31).
+ * It never moves a payment earlier: edits can leave nextDueDate past that day.
  */
-export function advanceDueDate(dateStr, period) {
+export function advanceDueDate(dateStr, period, startDate) {
   const d = new Date(dateStr + 'T00:00:00');
-  const currentDay = d.getDate();
+  const anchorDay = Math.max(
+    d.getDate(),
+    startDate ? Number(startDate.slice(8, 10)) : 0,
+  );
+  const addMonths = (n) => {
+    d.setDate(1);
+    d.setMonth(d.getMonth() + n);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(anchorDay, lastDay));
+  };
   switch (period) {
     case 'daily':
       d.setDate(d.getDate() + 1);
@@ -37,16 +50,13 @@ export function advanceDueDate(dateStr, period) {
       d.setDate(d.getDate() + 14);
       break;
     case 'monthly':
-      d.setMonth(d.getMonth() + 1);
-      if (d.getDate() !== currentDay) d.setDate(0); // snap to last valid day
+      addMonths(1);
       break;
     case 'quarterly':
-      d.setMonth(d.getMonth() + 3);
-      if (d.getDate() !== currentDay) d.setDate(0);
+      addMonths(3);
       break;
     case 'yearly':
-      d.setFullYear(d.getFullYear() + 1);
-      if (currentDay === 29 && d.getDate() !== 29) d.setDate(0); // Feb 29 -> 28
+      addMonths(12);
       break;
   }
   return formatLocalDate(d);
@@ -72,6 +82,7 @@ export const processScheduledPayments = async () => {
     // read happens per-payment *inside* the transaction under a row lock below,
     // so a stale nextDueDate captured here can never cause a double insert.
     for (const candidate of scheduledPayments) {
+      let alertFor = null;
       try {
         // Catch-up: a payment may be overdue by many periods (server asleep on
         // shared hosting, or the previously missing catch-up loop). Materialize
@@ -150,7 +161,7 @@ export const processScheduledPayments = async () => {
               }
             }
 
-            dueStr = advanceDueDate(dueStr, payment.period);
+            dueStr = advanceDueDate(dueStr, payment.period, payment.startDate);
 
             // Each materialized payment consumes one occurrence (when limited).
             if (occurrences != null) {
@@ -162,6 +173,9 @@ export const processScheduledPayments = async () => {
             if (endDateStr && dueStr > endDateStr) status = 'paused';
           }
 
+          if (materialized > 0 && payment.type === 'expense') {
+            alertFor = { userId: payment.UserId, categoryId: payment.CategoryId };
+          }
           payment.nextDueDate = dueStr;
           payment.occurrences = occurrences;
           payment.status = status;
@@ -172,6 +186,10 @@ export const processScheduledPayments = async () => {
               `materialized ${materialized} transaction(s), next due: ${payment.nextDueDate}, status: ${payment.status}`,
           );
         });
+        // After commit, so the new expenses count toward the month.
+        if (alertFor) {
+          await checkBudgetThresholds(alertFor.userId, alertFor.categoryId, todayStr, todayStr);
+        }
       } catch (innerErr) {
         console.error(
           `Error processing individual payment ${candidate.id}:`,
@@ -223,3 +241,14 @@ export const refreshMarketData = async () => {
 };
 
 cron.schedule('30 5 * * *', refreshMarketData);
+
+// Net worth: late in the day, after markets close, so the value saved on the
+// last day of a month is that month's close.
+cron.schedule('50 23 * * *', async () => {
+  try {
+    const saved = await recordNetWorthSnapshots();
+    console.log(`Net worth snapshots saved: ${saved}`);
+  } catch (err) {
+    console.error('Net worth snapshots failed:', err.message);
+  }
+});
