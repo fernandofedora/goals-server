@@ -3,6 +3,7 @@ import { app } from './app.js';
 import { connectDB } from './config/db.js';
 import { processScheduledPayments } from './cron.js';
 import { ensureCatalog } from './services/marketData/index.js';
+import { migrateCategoryBudgets } from './services/spendingBudgets.js';
 
 dotenv.config();
 
@@ -20,6 +21,9 @@ app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 (async () => {
   try {
     await connectDB();
+    // One-time data move; a no-op once every category budget was migrated.
+    const moved = await migrateCategoryBudgets();
+    if (moved) console.log(`Migration: moved ${moved} category budget(s) to flexible budgets`);
     await processScheduledPayments();
   } catch (err) {
     console.error('Startup initialization error:', err);

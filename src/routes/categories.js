@@ -12,11 +12,6 @@ const plain = (item) => {
   return data;
 };
 
-const parseBudget = (monthlyBudget) =>
-  monthlyBudget !== undefined && monthlyBudget !== '' && monthlyBudget !== null
-    ? Number(monthlyBudget)
-    : null;
-
 // Subcategories are one level deep: the parent must be the user's own
 // top-level category, and the child takes the parent's type.
 async function resolveParent(userId, parentId, selfId) {
@@ -53,14 +48,13 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { name, color, type, monthlyBudget, parentId } = req.body;
+  const { name, color, type, parentId } = req.body;
   const { parent, error, message } = await resolveParent(req.userId, parentId);
   if (error) return res.status(400).json({ code: error, message });
   const item = await Category.create({
     name,
     color,
     type: parent ? parent.type : type,
-    monthlyBudget: parseBudget(monthlyBudget),
     parentId: parent?.id ?? null,
     UserId: req.userId,
   });
@@ -79,12 +73,11 @@ router.put('/:id', async (req, res) => {
     where: { id: req.params.id, UserId: req.userId },
   });
   if (!item) return res.status(404).json({ message: 'Not found' });
-  const { name, color, type, monthlyBudget } = req.body;
+  const { name, color, type } = req.body;
   const fields = {
     name,
     color,
     type,
-    monthlyBudget: parseBudget(monthlyBudget),
   };
 
   // parentId is only touched when sent, so older clients keep working.

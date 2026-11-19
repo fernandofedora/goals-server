@@ -2,7 +2,13 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app.js';
 import { Tag, Transaction } from '../src/models/index.js';
-import { createAccount, createCategory, createUser } from './helpers.js';
+import { budgetStatuses } from '../src/services/spendingBudgets.js';
+import {
+  createAccount,
+  createBudget,
+  createCategory,
+  createUser,
+} from './helpers.js';
 
 let user;
 let auth;
@@ -19,9 +25,8 @@ const summary = () =>
 
 beforeEach(async () => {
   ({ user, auth } = await createUser());
-  food = await createCategory(user, 'Comida', 'expense', {
-    monthlyBudget: 100,
-  });
+  food = await createCategory(user, 'Comida');
+  await createBudget(user, {}, { categories: [food] });
   health = await createCategory(user, 'Salud');
   salary = await createCategory(user, 'Salario', 'income');
   bank = await createAccount(user, 'Banco', { initialBalance: 500 });
@@ -79,11 +84,8 @@ describe('splitting a transaction', () => {
       .set(auth);
     expect(list.body.total).toBe(2);
     expect(list.body.items.every((t) => t.splitOfId === tx.id)).toBe(true);
-    const budget = await request(app)
-      .get(`/api/stats/category-budget/${food.id}`)
-      .query({ period: '2026-03' })
-      .set(auth);
-    expect(budget.body.spent).toBe(55.5);
+    const [budget] = await budgetStatuses(user.id, '2026-03-15');
+    expect(budget.spent).toBe(55.5);
   });
 
   it('refuses parts that do not add up or do not fit', async () => {

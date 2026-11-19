@@ -15,6 +15,7 @@ import investmentsRoutes from './routes/investments.js';
 import rulesRoutes from './routes/rules.js';
 import importRoutes from './routes/import.js';
 import tagsRoutes from './routes/tags.js';
+import spendingBudgetsRoutes from './routes/spendingBudgets.js';
 
 // Separate from index.js so tests can mount the API without listening or booting the DB.
 export const app = express();
@@ -39,3 +40,4 @@ app.use('/api/investments', investmentsRoutes);
 app.use('/api/rules', rulesRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/tags', tagsRoutes);
+app.use('/api/spending-budgets', spendingBudgetsRoutes);

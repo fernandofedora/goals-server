@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { Account, Card, Category, User } from '../src/models/index.js';
+import { Account, Card, Category, SpendingBudget, User } from '../src/models/index.js';
 
 let seq = 0;
 
@@ -23,3 +23,18 @@ export const createCard = (user, name = 'Visa') =>
 
 export const createAccount = (user, name = 'Banco', extra = {}) =>
   Account.create({ name, initialBalance: 0, UserId: user.id, ...extra });
+
+/** A flexible budget over `categories` / `tags` (monthly from day 1 by default). */
+export async function createBudget(user, fields = {}, { categories = [], tags = [] } = {}) {
+  const budget = await SpendingBudget.create({
+    name: 'Presupuesto',
+    amount: 100,
+    periodType: 'monthly',
+    startDay: 1,
+    UserId: user.id,
+    ...fields,
+  });
+  await budget.setCategories(categories);
+  await budget.setTags(tags);
+  return budget;
+}

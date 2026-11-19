@@ -341,8 +341,10 @@ router.post('/bulk-delete', async (req, res) => {
 
 // Fire and forget: SMTP latency must not hold up the response, and the check
 // never throws.
-const alertIfExpense = (userId, tx) => {
-  if (tx.type === 'expense') checkBudgetThresholds(userId, tx.CategoryId, tx.date);
+const alertIfExpense = (userId, tx, tagIds = []) => {
+  if (tx.type === 'expense') {
+    checkBudgetThresholds(userId, tx.CategoryId, tx.date, undefined, tagIds);
+  }
 };
 
 router.post('/', async (req, res) => {
@@ -374,7 +376,7 @@ router.post('/', async (req, res) => {
     AccountId: accountId || null,
   });
   if (tags?.length) await item.setTags(tags);
-  alertIfExpense(req.userId, item);
+  alertIfExpense(req.userId, item, (tags ?? []).map((tag) => tag.id));
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
     include: [
@@ -430,7 +432,7 @@ router.put('/:id', async (req, res) => {
     AccountId: accountId || null,
   });
   if (tags) await item.setTags(tags);
-  alertIfExpense(req.userId, item);
+  alertIfExpense(req.userId, item, (tags ?? []).map((tag) => tag.id));
   const full = await Transaction.findByPk(item.id, {
     attributes: { exclude: ['UserId'] },
     include: [

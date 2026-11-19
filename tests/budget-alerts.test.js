@@ -1,15 +1,21 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app.js';
-import { BudgetAlertLog, Transaction } from '../src/models/index.js';
+import { SpendingBudgetAlert, Tag, Transaction } from '../src/models/index.js';
 import { checkBudgetThresholds } from '../src/services/budgetAlerts.js';
 import { sendBudgetAlertEmail } from '../src/utils/mail.js';
-import { createAccount, createCategory, createUser } from './helpers.js';
+import {
+  createAccount,
+  createBudget,
+  createCategory,
+  createUser,
+} from './helpers.js';
 
 const TODAY = '2026-03-15';
 let user;
 let auth;
 let food;
+let budget;
 
 const spend = (amount, category = food, extra = {}) =>
   Transaction.create({
@@ -22,17 +28,20 @@ const spend = (amount, category = food, extra = {}) =>
     UserId: user.id,
     ...extra,
   });
-const check = (category = food, date = TODAY) =>
-  checkBudgetThresholds(user.id, category.id, date, TODAY);
+const check = (category = food, date = TODAY, tagIds = []) =>
+  checkBudgetThresholds(user.id, category?.id ?? null, date, TODAY, tagIds);
 
 beforeEach(async () => {
   sendBudgetAlertEmail.mockReset();
   sendBudgetAlertEmail.mockResolvedValue(undefined);
   ({ user, auth } = await createUser());
   await user.update({ language: 'es', currency: 'USD' });
-  food = await createCategory(user, 'Comida', 'expense', {
-    monthlyBudget: 100,
-  });
+  food = await createCategory(user, 'Comida');
+  budget = await createBudget(
+    user,
+    { name: 'Comida', amount: 100 },
+    { categories: [food] },
+  );
 });
 
 describe('checkBudgetThresholds', () => {
@@ -44,11 +53,11 @@ describe('checkBudgetThresholds', () => {
 
   it('emails once at 80% and once at 100%, never twice', async () => {
     await spend(85);
-    expect(await check()).toEqual([{ categoryId: food.id, threshold: 80 }]);
+    expect(await check()).toEqual([{ budgetId: budget.id, threshold: 80 }]);
     await spend(5);
     expect(await check()).toEqual([]);
     await spend(10);
-    expect(await check()).toEqual([{ categoryId: food.id, threshold: 100 }]);
+    expect(await check()).toEqual([{ budgetId: budget.id, threshold: 100 }]);
     await spend(50);
     expect(await check()).toEqual([]);
     expect(sendBudgetAlertEmail).toHaveBeenCalledTimes(2);
@@ -64,31 +73,45 @@ describe('checkBudgetThresholds', () => {
 
   it('sends a single email when one expense jumps past 100%', async () => {
     await spend(130);
-    expect(await check()).toEqual([{ categoryId: food.id, threshold: 100 }]);
+    expect(await check()).toEqual([{ budgetId: budget.id, threshold: 100 }]);
     expect(sendBudgetAlertEmail).toHaveBeenCalledTimes(1);
-    expect(await BudgetAlertLog.count({ where: { UserId: user.id } })).toBe(2);
+    expect(
+      await SpendingBudgetAlert.count({ where: { UserId: user.id } }),
+    ).toBe(2);
   });
 
-  it('measures a parent without budget against the sum of its children', async () => {
+  it('alerts every budget the expense counts toward, tags included', async () => {
+    const trip = await Tag.create({ name: 'Viaje', UserId: user.id });
+    const travel = await createBudget(
+      user,
+      { name: 'Viaje', amount: 50 },
+      { tags: [trip] },
+    );
+    const tx = await spend(45);
+    await tx.setTags([trip]);
+    // Comida is at 45%; Viaje at 90%.
+    expect(await check(food, TODAY, [trip.id])).toEqual([
+      { budgetId: travel.id, threshold: 80 },
+    ]);
+  });
+
+  it('a parent category budget counts its subcategories', async () => {
     const home = await createCategory(user, 'Hogar');
     const light = await createCategory(user, 'Luz', 'expense', {
       parentId: home.id,
-      monthlyBudget: 60,
     });
-    await createCategory(user, 'Agua', 'expense', {
-      parentId: home.id,
-      monthlyBudget: 40,
-    });
-    await spend(50, light);
-    // Luz is at 83% of 60; Hogar at 50% of 100.
+    const homeBudget = await createBudget(
+      user,
+      { name: 'Hogar', amount: 100 },
+      { categories: [home] },
+    );
+    await spend(85, light);
     expect(await check(light)).toEqual([
-      { categoryId: light.id, threshold: 80 },
+      { budgetId: homeBudget.id, threshold: 80 },
     ]);
-    await spend(35, home);
-    expect(await check(home)).toEqual([{ categoryId: home.id, threshold: 80 }]);
   });
 
-  it('ignores isolated accounts, past months, income and disabled users', async () => {
+  it('ignores isolated accounts, past periods and disabled users', async () => {
     const isolated = await createAccount(user, 'Aparte', {
       isExcludedFromTotals: true,
     });
@@ -98,15 +121,19 @@ describe('checkBudgetThresholds', () => {
     await spend(90, food, { date: '2026-02-10' });
     expect(await check(food, '2026-02-10')).toEqual([]);
 
-    const salary = await createCategory(user, 'Salario', 'income', {
-      monthlyBudget: 10,
-    });
-    expect(await check(salary)).toEqual([]);
-
     await spend(90);
     await user.update({ budgetAlertsEnabled: false });
     expect(await check()).toEqual([]);
     expect(sendBudgetAlertEmail).not.toHaveBeenCalled();
+  });
+
+  it('alerts again in the next period', async () => {
+    await spend(90);
+    expect(await check()).toHaveLength(1);
+    await spend(90, food, { date: '2026-04-02' });
+    expect(
+      await checkBudgetThresholds(user.id, food.id, '2026-04-02', '2026-04-02'),
+    ).toEqual([{ budgetId: budget.id, threshold: 80 }]);
   });
 
   it('retries on the next expense when the email fails', async () => {
@@ -114,8 +141,10 @@ describe('checkBudgetThresholds', () => {
     sendBudgetAlertEmail.mockRejectedValueOnce(new Error('SMTP down'));
     await spend(85);
     expect(await check()).toEqual([]);
-    expect(await BudgetAlertLog.count({ where: { UserId: user.id } })).toBe(0);
-    expect(await check()).toEqual([{ categoryId: food.id, threshold: 80 }]);
+    expect(
+      await SpendingBudgetAlert.count({ where: { UserId: user.id } }),
+    ).toBe(0);
+    expect(await check()).toEqual([{ budgetId: budget.id, threshold: 80 }]);
     errorLog.mockRestore();
   });
 });

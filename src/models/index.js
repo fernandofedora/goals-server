@@ -199,6 +199,49 @@ export const TransactionTag = sequelize.define(
   { timestamps: false },
 );
 
+// Flexible budgets (see services/spendingBudgets.js): a name, an amount per
+// weekly, monthly or quarterly period starting on any day, and the categories
+// and tags whose spending counts. The catch-all one (one per user) takes the
+// spending no other budget covers. Replaces Category.monthlyBudget.
+export const SpendingBudget = sequelize.define('SpendingBudget', {
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  name: { type: DataTypes.STRING(60), allowNull: false },
+  amount: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+  periodType: {
+    type: DataTypes.ENUM('weekly', 'monthly', 'quarterly'),
+    allowNull: false,
+    defaultValue: 'monthly',
+  },
+  // Day of the month (1–31) for monthly and quarterly, weekday (1 = Monday) for weekly.
+  startDay: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  // Carry what was left (or overspent) into the next period.
+  rollover: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  isCatchAll: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  migratedFromCategoryId: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+});
+export const SpendingBudgetCategory = sequelize.define('SpendingBudgetCategory', {}, { timestamps: false });
+export const SpendingBudgetTag = sequelize.define('SpendingBudgetTag', {}, { timestamps: false });
+// One row per alert sent: each threshold once per budget and period.
+export const SpendingBudgetAlert = sequelize.define(
+  'SpendingBudgetAlert',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    SpendingBudgetId: { type: DataTypes.INTEGER, allowNull: false },
+    periodStart: { type: DataTypes.DATEONLY, allowNull: false },
+    threshold: { type: DataTypes.INTEGER, allowNull: false },
+  },
+  {
+    indexes: [
+      {
+        unique: true,
+        name: 'spending_budget_alert_once',
+        fields: ['SpendingBudgetId', 'periodStart', 'threshold'],
+      },
+    ],
+  },
+);
+
 export const CategoryRule = sequelize.define('CategoryRule', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   name: { type: DataTypes.STRING(80), allowNull: false },
@@ -375,6 +418,12 @@ Transaction.belongsTo(Category);
 User.hasMany(Tag, { onDelete: 'CASCADE' });
 Tag.belongsTo(User);
 Transaction.belongsToMany(Tag, { through: TransactionTag, onDelete: 'CASCADE' });
+User.hasMany(SpendingBudget, { onDelete: 'CASCADE' });
+SpendingBudget.belongsTo(User);
+SpendingBudget.belongsToMany(Category, { through: SpendingBudgetCategory, onDelete: 'CASCADE' });
+Category.belongsToMany(SpendingBudget, { through: SpendingBudgetCategory, onDelete: 'CASCADE' });
+SpendingBudget.belongsToMany(Tag, { through: SpendingBudgetTag, onDelete: 'CASCADE' });
+Tag.belongsToMany(SpendingBudget, { through: SpendingBudgetTag, onDelete: 'CASCADE' });
 Tag.belongsToMany(Transaction, { through: TransactionTag, onDelete: 'CASCADE' });
 Card.hasMany(Transaction);
 Transaction.belongsTo(Card);
