@@ -171,8 +171,9 @@ export async function buildPreview(userId, language, target, rawRows) {
   const saved = new Map();
   if (valid.length) {
     const dates = valid.map((r) => r.date).sort();
-    const existing = await Transaction.findAll({
+    const existing = await Transaction.unscoped().findAll({
       where: {
+        splitOfId: null,
         UserId: userId,
         AccountId: target.AccountId,
         CardId: target.CardId,
@@ -292,4 +293,4 @@ export async function listBatches(userId) {
 
 /** Deletes every transaction of one batch of the user; returns how many. */
 export const undoBatch = (userId, batchId) =>
-  Transaction.destroy({ where: { UserId: userId, importBatchId: batchId } });
+  Transaction.unscoped().destroy({ where: { UserId: userId, importBatchId: batchId } });

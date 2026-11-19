@@ -3,7 +3,8 @@ import { Op, col, fn } from 'sequelize';
 import { authMiddleware } from '../middleware/auth.js';
 import { withChildIds } from '../utils/categoryTree.js';
 import { checkBudgetThresholds } from '../services/budgetAlerts.js';
-import { applyRules } from '../utils/categoryRules.js';
+import { applyRules, categoryFits } from '../utils/categoryRules.js';
+import { sequelize } from '../config/db.js';
 import {
   Transaction,
   Category,
@@ -314,13 +315,28 @@ router.patch('/bulk', async (req, res) => {
   res.json({ updated, skipped: owned - updated });
 });
 
+/**
+ * Ids to delete so no split is left half: a part brings its container and its
+ * sibling parts along. Returns how many visible transactions go.
+ */
+async function deleteWithSplits(userId, ids) {
+  const any = Transaction.unscoped();
+  const rows = await any.findAll({ where: { id: ids, UserId: userId }, attributes: ['id', 'splitOfId'] });
+  const containers = [...new Set(rows.map((r) => r.splitOfId).filter(Boolean))];
+  const siblings = containers.length
+    ? await any.findAll({ where: { splitOfId: containers, UserId: userId }, attributes: ['id'] })
+    : [];
+  const visible = new Set([...rows.map((r) => r.id), ...siblings.map((r) => r.id)]);
+  await sequelize.transaction(async (t) => {
+    await any.destroy({ where: { id: [...visible, ...containers], UserId: userId }, transaction: t });
+  });
+  return visible.size;
+}
+
 router.post('/bulk-delete', async (req, res) => {
   const ids = parseIds(req.body.ids);
   if (!ids) return res.status(400).json({ message: 'Invalid ids' });
-  const deleted = await Transaction.destroy({
-    where: { id: ids, UserId: req.userId },
-  });
-  res.json({ deleted });
+  res.json({ deleted: await deleteWithSplits(req.userId, ids) });
 });
 
 // Fire and forget: SMTP latency must not hold up the response, and the check
@@ -386,6 +402,21 @@ router.put('/:id', async (req, res) => {
     cardId,
     accountId,
   } = req.body;
+  if (item.splitOfId) {
+    const locked =
+      cents(amount) !== cents(item.amount) ||
+      date !== item.date ||
+      type !== item.type ||
+      paymentMethod !== item.paymentMethod ||
+      (cardId || null) !== (item.CardId || null) ||
+      (accountId || null) !== (item.AccountId || null);
+    if (locked) {
+      return res.status(409).json({
+        code: 'SPLIT_PART_LOCKED',
+        message: 'Es parte de una división: cambia el monto, la fecha o la cuenta desde "Editar división".',
+      });
+    }
+  }
   const { tags, error: badTags } = await resolveTags(req.userId, req.body.tagIds);
   if (badTags) return tagError(res);
   await item.update({
@@ -417,8 +448,154 @@ router.delete('/:id', async (req, res) => {
     where: { id: req.params.id, UserId: req.userId },
   });
   if (!item) return res.status(404).json({ message: 'Not found' });
-  await item.destroy();
-  res.json({ success: true });
+  const deleted = await deleteWithSplits(req.userId, [item.id]);
+  res.json({ success: true, deleted });
+});
+
+// ── Split transactions ──────────────────────────────────────────────────────
+const MAX_PARTS = 20;
+const cents = (n) => Math.round(Number(n) * 100);
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+
+/** The container of a split, or of the transaction that would become one. */
+async function findSplitRoot(userId, id) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const item = await Transaction.unscoped().findOne({ where: { id, UserId: userId } });
+  if (!item || !item.splitOfId) return item;
+  return Transaction.unscoped().findOne({ where: { id: item.splitOfId, UserId: userId } });
+}
+
+const loadParts = (container) =>
+  Transaction.findAll({
+    where: { splitOfId: container.id, UserId: container.UserId },
+    attributes: { exclude: ['UserId'] },
+    include: [{ model: Category, attributes: ['id', 'name', 'color', 'type'] }, TAG_INCLUDE],
+    order: [['id', 'ASC']],
+  });
+
+const splitView = async (container) => ({
+  original: {
+    id: container.id,
+    description: container.description,
+    amount: Number(container.amount),
+    date: container.date,
+    type: container.type,
+    categoryId: container.CategoryId,
+    isSplit: container.isSplitContainer,
+  },
+  parts: container.isSplitContainer ? await loadParts(container) : [],
+});
+
+/**
+ * Checks the parts of a split. They must be 2 to 20, each with an amount above
+ * 0 (2 decimals) and one of the user's categories that fits the type, and add
+ * up exactly to the original.
+ */
+async function validateParts(userId, container, parts) {
+  if (!Array.isArray(parts) || parts.length < 2 || parts.length > MAX_PARTS) {
+    return { error: 'SPLIT_PART_COUNT' };
+  }
+  const categoryIds = [...new Set(parts.map((p) => Number(p.categoryId)))];
+  const categories = await Category.findAll({ where: { id: categoryIds, UserId: userId } });
+  const clean = [];
+  for (const p of parts) {
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-6) {
+      return { error: 'SPLIT_PART_AMOUNT' };
+    }
+    const category = categories.find((c) => c.id === Number(p.categoryId));
+    if (!category || !categoryFits(category, container.type)) return { error: 'SPLIT_PART_CATEGORY' };
+    const description = String(p.description ?? '').replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim();
+    if (description.length > 255) return { error: 'SPLIT_PART_DESCRIPTION' };
+    const tags = await resolveTags(userId, p.tagIds);
+    if (tags.error) return { error: 'TAGS_INVALID' };
+    clean.push({ amount: cents(amount) / 100, category, description: description || container.description, tags: tags.tags });
+  }
+  const total = clean.reduce((sum, p) => sum + cents(p.amount), 0);
+  if (total !== cents(container.amount)) return { error: 'SPLIT_SUM_MISMATCH', total: total / 100 };
+  return { parts: clean };
+}
+
+const SPLIT_MESSAGES = {
+  SPLIT_PART_COUNT: 'Divide en 2 a 20 partes.',
+  SPLIT_PART_AMOUNT: 'Cada parte necesita un monto mayor que 0 con hasta 2 decimales.',
+  SPLIT_PART_CATEGORY: 'Cada parte necesita una de tus categorías del mismo tipo.',
+  SPLIT_PART_DESCRIPTION: 'La descripción de una parte tiene hasta 255 caracteres.',
+  SPLIT_SUM_MISMATCH: 'Las partes deben sumar exactamente el total.',
+  TAGS_INVALID: 'Etiquetas no válidas',
+};
+
+router.get('/:id/split', async (req, res) => {
+  const container = await findSplitRoot(req.userId, req.params.id);
+  if (!container) return res.status(404).json({ message: 'Not found' });
+  res.json(await splitView(container));
+});
+
+// Splits a transaction, or replaces the parts of one already split.
+router.put('/:id/split', async (req, res) => {
+  const container = await findSplitRoot(req.userId, req.params.id);
+  if (!container) return res.status(404).json({ message: 'Not found' });
+  const checked = await validateParts(req.userId, container, req.body?.parts);
+  if (checked.error) {
+    return res.status(400).json({ code: checked.error, message: SPLIT_MESSAGES[checked.error], total: checked.total });
+  }
+  await sequelize.transaction(async (t) => {
+    // Parts inherit the tags: from the original on a first split, from the
+    // current parts when the split is edited.
+    const inherited = container.isSplitContainer
+      ? [
+          ...new Map(
+            (await loadParts(container))
+              .flatMap((p) => p.Tags || [])
+              .map((tag) => [tag.id, tag]),
+          ).values(),
+        ]
+      : await container.getTags({ transaction: t });
+    await Transaction.destroy({ where: { splitOfId: container.id, UserId: req.userId }, transaction: t });
+    await container.update({ isSplitContainer: true, CategoryId: null }, { transaction: t });
+    await container.setTags([], { transaction: t });
+    for (const p of checked.parts) {
+      const part = await Transaction.create(
+        {
+          UserId: req.userId,
+          splitOfId: container.id,
+          type: container.type,
+          date: container.date,
+          paymentMethod: container.paymentMethod,
+          AccountId: container.AccountId,
+          CardId: container.CardId,
+          importBatchId: container.importBatchId,
+          description: p.description,
+          amount: p.amount,
+          CategoryId: p.category.id,
+        },
+        { transaction: t },
+      );
+      const tags = p.tags ?? inherited;
+      if (tags.length) await part.setTags(tags, { transaction: t });
+    }
+  });
+  const fresh = await Transaction.unscoped().findByPk(container.id);
+  for (const p of checked.parts) {
+    if (container.type === 'expense') checkBudgetThresholds(req.userId, p.category.id, container.date);
+  }
+  res.json(await splitView(fresh));
+});
+
+// Joins a split back into one transaction, with the first part's category.
+router.delete('/:id/split', async (req, res) => {
+  const container = await findSplitRoot(req.userId, req.params.id);
+  if (!container) return res.status(404).json({ message: 'Not found' });
+  if (!container.isSplitContainer) return res.status(400).json({ code: 'SPLIT_NOT_SPLIT', message: 'No está dividida.' });
+  const parts = await loadParts(container);
+  const tagIds = [...new Set(parts.flatMap((p) => (p.Tags || []).map((tag) => tag.id)))];
+  await sequelize.transaction(async (t) => {
+    await Transaction.destroy({ where: { splitOfId: container.id, UserId: req.userId }, transaction: t });
+    await container.update({ isSplitContainer: false, CategoryId: parts[0]?.CategoryId ?? null }, { transaction: t });
+    if (tagIds.length) await container.setTags(tagIds, { transaction: t });
+  });
+  res.json(await splitView(await Transaction.findByPk(container.id)));
 });
 
 export default router;

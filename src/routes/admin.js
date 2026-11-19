@@ -209,7 +209,7 @@ router.delete('/users/:id', async (req, res) => {
       await SavingsPlan.destroy({ where: { UserId: userId }, transaction: t });
 
       // Transactions (before categories & accounts)
-      await Transaction.destroy({ where: { UserId: userId }, transaction: t });
+      await Transaction.unscoped().destroy({ where: { UserId: userId }, transaction: t });
 
       // Scheduled Payments
       await ScheduledPayment.destroy({ where: { UserId: userId }, transaction: t });

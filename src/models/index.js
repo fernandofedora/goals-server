@@ -102,6 +102,14 @@ export const Transaction = sequelize.define('Transaction', {
   ScheduledPaymentId: { type: DataTypes.INTEGER, allowNull: true },
   // Set on rows created by a file import, so the whole batch can be undone.
   importBatchId: { type: DataTypes.STRING(36), allowNull: true },
+  // Split transactions (see routes/transactions.js): the original becomes a
+  // hidden container and its parts carry the categories and amounts.
+  isSplitContainer: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  splitOfId: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+}, {
+  // Every query sees the parts, never the container, so totals count a split
+  // purchase once. Code that needs the container calls Transaction.unscoped().
+  defaultScope: { where: { isSplitContainer: false } },
 });
 
 export const Budget = sequelize.define('Budget', {

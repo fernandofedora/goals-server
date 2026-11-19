@@ -43,6 +43,23 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Transactions.importBatchId column');
     }
+    if (!descTrans.isSplitContainer) {
+      await qi.addColumn('Transactions', 'isSplitContainer', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
+      console.log('Migration: added Transactions.isSplitContainer column');
+    }
+    if (!descTrans.splitOfId) {
+      await qi.addColumn('Transactions', 'splitOfId', {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+      });
+      await qi.addIndex('Transactions', ['splitOfId'], { name: 'tx_split_of' });
+      console.log('Migration: added Transactions.splitOfId column');
+    }
     if (!descTrans.ScheduledPaymentId) {
       await qi.addColumn('Transactions', 'ScheduledPaymentId', {
         type: DataTypes.INTEGER,
