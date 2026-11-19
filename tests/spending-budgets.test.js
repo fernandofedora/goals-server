@@ -352,6 +352,30 @@ describe('migrateCategoryBudgets', () => {
     expect(await SpendingBudget.count({ where: { UserId: user.id } })).toBe(1);
   });
 
+  it('finds the budget behind an old category link', async () => {
+    await food.update({ monthlyBudget: 200 });
+    await migrateCategoryBudgets();
+    const migrated = await SpendingBudget.findOne({
+      where: { UserId: user.id, migratedFromCategoryId: food.id },
+    });
+    const byCategory = (id, as = auth) =>
+      request(app).get(`/api/spending-budgets/by-category/${id}`).set(as);
+    expect((await byCategory(food.id)).body).toEqual({
+      id: migrated.id,
+      periodType: 'monthly',
+      startDay: 1,
+    });
+
+    // Without a migration, a budget over just that category also matches.
+    const own = await createBudget(user, {}, { categories: [light] });
+    expect((await byCategory(light.id)).body.id).toBe(own.id);
+    await createBudget(user, {}, { categories: [home, food] });
+    expect((await byCategory(home.id)).status).toBe(404);
+    expect((await byCategory('abc')).status).toBe(404);
+    const other = await createUser();
+    expect((await byCategory(food.id, other.auth)).status).toBe(404);
+  });
+
   it('categories no longer take a budget through the API', async () => {
     const res = await request(app)
       .post('/api/categories')

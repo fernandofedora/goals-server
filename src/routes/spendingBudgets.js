@@ -40,12 +40,10 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const count = await SpendingBudget.count({ where: { UserId: req.userId } });
   if (count >= MAX_BUDGETS) {
-    return res
-      .status(400)
-      .json({
-        code: 'BUDGET_LIMIT',
-        message: 'Llegaste al máximo de presupuestos.',
-      });
+    return res.status(400).json({
+      code: 'BUDGET_LIMIT',
+      message: 'Llegaste al máximo de presupuestos.',
+    });
   }
   const checked = await validateBudget(req.userId, req.body);
   if (checked.error) return res.status(400).json(checked.error);
@@ -83,6 +81,31 @@ router.delete('/:id', async (req, res) => {
   if (!budget) return res.status(404).json({ message: 'Not found' });
   await budget.destroy();
   res.json({ success: true });
+});
+
+// Old links pointed at a category (/transactions/budget/:categoryId). Finds the
+// budget migrated from it, or else one whose only scope is that category.
+router.get('/by-category/:categoryId', async (req, res) => {
+  const categoryId = Number(req.params.categoryId);
+  if (!Number.isInteger(categoryId) || categoryId <= 0) {
+    return res.status(404).json({ message: 'Not found' });
+  }
+  const budgets = await loadBudgets(req.userId);
+  const match =
+    budgets.find((b) => b.migratedFromCategoryId === categoryId) ||
+    budgets.find(
+      (b) =>
+        !b.isCatchAll &&
+        !b.Tags.length &&
+        b.Categories.length === 1 &&
+        b.Categories[0].id === categoryId,
+    );
+  if (!match) return res.status(404).json({ message: 'Not found' });
+  res.json({
+    id: match.id,
+    periodType: match.periodType,
+    startDay: match.startDay,
+  });
 });
 
 // Day-by-day view of one period; offset 0 is the running one, -1 the previous…
