@@ -194,6 +194,17 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Cards.isHidden column');
     }
+    const cardColumns = {
+      creditLimit: { type: DataTypes.DECIMAL(16, 2), allowNull: true, defaultValue: null },
+      statementDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+      dueDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+    };
+    for (const [name, definition] of Object.entries(cardColumns)) {
+      if (!descCardCols[name]) {
+        await qi.addColumn('Cards', name, definition);
+        console.log(`Migration: added Cards.${name} column`);
+      }
+    }
 
     const desc = await qi.describeTable('Users').catch(() => ({}));
     if (!desc.publicId) {

@@ -6,6 +6,7 @@ import {
   User,
 } from '../models/index.js';
 import { portfolioValue } from './portfolio.js';
+import { cardDebts, debtAtClose } from './cardStatus.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -58,16 +59,17 @@ const balanceAtClose = ({ initial, netByMonth }, key) => {
 
 /** Live net worth right now. */
 export async function currentNetWorth(user) {
-  const balances = await accountBalances(user.id);
+  const [balances, debts] = await Promise.all([accountBalances(user.id), cardDebts(user.id)]);
   const investments = seesInvestments(user)
     ? await portfolioValue(user.id, user.currency || 'USD')
     : 0;
   return {
     accounts: balances.today,
     investments,
-    debts: 0,
-    total: round2(balances.today + investments),
+    debts: debts.today,
+    total: round2(balances.today + investments - debts.today),
     balances,
+    cardDebts: debts,
   };
 }
 
@@ -75,7 +77,8 @@ export async function currentNetWorth(user) {
  * The last `months` month closes, oldest first, ending with the running month
  * (live values). Accounts are always recomputed from transactions, so a late
  * entry still shows up; investments use the month's snapshot when the cron
- * saved one (market value) and their cost otherwise.
+ * saved one (market value) and their cost otherwise. Card debt (cards with a
+ * limit) is subtracted.
  */
 export async function netWorthHistory(user, months = 13, now = new Date()) {
   const current = await currentNetWorth(user);
@@ -100,6 +103,7 @@ export async function netWorthHistory(user, months = 13, now = new Date()) {
         month: key,
         accounts: current.accounts,
         investments: current.investments,
+        debts: current.debts,
         total: current.total,
       });
       continue;
@@ -112,14 +116,17 @@ export async function netWorthHistory(user, months = 13, now = new Date()) {
         ? Number(snap.investments)
         : await portfolioValue(user.id, user.currency || 'USD', monthEnd(key));
     }
+    const debts = debtAtClose(current.cardDebts, key);
     history.push({
       month: key,
       accounts,
       investments,
-      total: round2(accounts + investments),
+      debts,
+      total: round2(accounts + investments - debts),
     });
   }
   delete current.balances;
+  delete current.cardDebts;
   return { current, history, includesInvestments: withInvestments };
 }
 

@@ -78,6 +78,11 @@ export const Card = sequelize.define('Card', {
   last4: { type: DataTypes.STRING, allowNull: false },
   // Hidden from the Accounts module (data and transactions are kept)
   isHidden: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Credit card details, all optional (see utils/cardCycle.js). With a limit
+  // set, the card's balance counts as debt in the net worth.
+  creditLimit: { type: DataTypes.DECIMAL(16, 2), allowNull: true, defaultValue: null },
+  statementDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+  dueDay: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
 });
 
 export const Transaction = sequelize.define('Transaction', {
