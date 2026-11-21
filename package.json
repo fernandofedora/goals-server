@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "create-admin": "node scripts/create-super-admin.js"
   },
   "keywords": [],
   "author": "",
