@@ -55,7 +55,7 @@ router.post('/register', byIp('register', 10, 60 * MINUTE), async (req, res) => 
     }
 
     try {
-      await sendVerificationEmail(email, name, verificationToken);
+      await sendVerificationEmail(email, name, verificationToken, user.language);
     } catch (mailErr) {
       console.error('Failed to send verification email:', mailErr);
       // We still registered the user, but they might need a way to resend the email
@@ -127,7 +127,7 @@ router.post(
         resetPasswordToken: hashResetToken(resetToken),
         resetPasswordExpires: new Date(Date.now() + RESET_TOKEN_TTL_MS),
       });
-      sendResetPasswordEmail(user.email, user.name, resetToken).catch((mailErr) =>
+      sendResetPasswordEmail(user.email, user.name, resetToken, user.language).catch((mailErr) =>
         console.error('Failed to send reset email:', mailErr),
       );
     }
