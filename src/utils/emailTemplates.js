@@ -286,7 +286,7 @@ const rows = (items) => `
 export function monthlySummaryEmail({ name, language, currency, month, summary, unsubscribeUrl }) {
   const lang = pickLang(language);
   const c = MONTHLY_COPY[lang];
-  const money = (n) => formatMoney(n, currency || 'USD', lang);
+  const money = (n) => formatMoney(n, currency || 'USD');
   const monthName = new Intl.DateTimeFormat(lang === 'en' ? 'en-US' : 'es', {
     month: 'long',
     year: 'numeric',

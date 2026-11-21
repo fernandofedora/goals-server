@@ -69,16 +69,8 @@ export async function checkBudgetThresholds(
           language: user.language,
           categoryName: status.name,
           threshold,
-          spent: formatMoney(
-            status.spent,
-            user.currency || 'USD',
-            user.language,
-          ),
-          budget: formatMoney(
-            status.available,
-            user.currency || 'USD',
-            user.language,
-          ),
+          spent: formatMoney(status.spent, user.currency || 'USD'),
+          budget: formatMoney(status.available, user.currency || 'USD'),
           percent: Math.round(status.percent),
         });
         sent.push({ budgetId: status.id, threshold });
