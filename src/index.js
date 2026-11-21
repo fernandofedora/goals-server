@@ -9,6 +9,18 @@ dotenv.config();
 
 const PORT = process.env.PORT || 4000;
 
+// Every JWT is signed with this key; a short one can be brute-forced offline
+// from any token. Only warn: exiting here would get the app marked 503.
+const secretLength = (process.env.SECRET_KEY || '').length;
+if (secretLength === 0) {
+  console.error('SECRET_KEY is not set: login and every authenticated route will fail');
+} else if (secretLength < 32) {
+  console.warn(
+    `SECRET_KEY is only ${secretLength} characters; use at least 32 random ones ` +
+      '(for example: openssl rand -base64 48)',
+  );
+}
+
 // Start listening IMMEDIATELY. Hostinger/LiteSpeed (Passenger) marks the app as
 // 503 if app.listen() is delayed behind the DB handshake + migrations, so the
 // HTTP server must come up first and DB init must NOT block module startup

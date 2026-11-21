@@ -17,14 +17,16 @@ const NAME_MAX = 50;
 const COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 // Checks the editable fields. `partial` (PUT) only checks the ones sent.
-function validateFields({ name, type, color }, partial = false) {
+// `inheritsType`: a new subcategory takes its parent's type, so none is needed.
+function validateFields({ name, type, color }, partial = false, inheritsType = false) {
   if (!partial || name !== undefined) {
     const trimmed = typeof name === 'string' ? name.trim() : '';
     if (!trimmed || trimmed.length > NAME_MAX) {
       return { code: 'CATEGORY_INVALID_NAME', message: 'Nombre inválido.' };
     }
   }
-  if ((!partial || type !== undefined) && !TYPES.includes(type)) {
+  const checkType = partial ? type !== undefined : !inheritsType || type !== undefined;
+  if (checkType && !TYPES.includes(type)) {
     return { code: 'CATEGORY_INVALID_TYPE', message: 'Tipo inválido.' };
   }
   if (color !== undefined && color !== null && !COLOR_RE.test(color)) {
@@ -70,7 +72,7 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const { name, color, type, parentId } = req.body;
-  const invalid = validateFields({ name, type, color });
+  const invalid = validateFields({ name, type, color }, false, parentId != null);
   if (invalid) return res.status(400).json(invalid);
   const { parent, error, message } = await resolveParent(req.userId, parentId);
   if (error) return res.status(400).json({ code: error, message });

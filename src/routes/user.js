@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import { authMiddleware } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { User } from '../models/index.js';
+import { isStrongPassword } from '../utils/password.js';
 
 const router = express.Router();
 
@@ -80,8 +81,8 @@ router.post(
         return res
           .status(400)
           .json({ message: 'Current and new password required' });
-      const strong = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,}$/.test(newPassword);
-      if (!strong) return res.status(400).json({ message: 'Weak password' });
+      if (!isStrongPassword(newPassword))
+        return res.status(400).json({ message: 'Weak password' });
       const user = await User.findByPk(req.userId);
       if (!user) return res.status(404).json({ message: 'User not found' });
       const ok = await bcrypt.compare(currentPassword, user.passwordHash);
