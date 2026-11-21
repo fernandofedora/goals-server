@@ -50,6 +50,14 @@ export const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: true,
   },
+  // Email on the 1st with the previous month's summary.
+  monthlySummaryEnabled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  // 'YYYY-MM' of the last summary sent, so a restart never sends it twice.
+  lastMonthlySummarySentFor: { type: DataTypes.STRING(7), allowNull: true },
 });
 
 export const Category = sequelize.define('Category', {

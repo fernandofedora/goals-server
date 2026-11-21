@@ -315,6 +315,20 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Users.budgetAlertsEnabled column');
     }
+    if (!desc.monthlySummaryEnabled) {
+      await qi.addColumn('Users', 'monthlySummaryEnabled', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      });
+      console.log('Migration: added Users.monthlySummaryEnabled column');
+    }
+    if (!desc.lastMonthlySummarySentFor) {
+      await qi.addColumn('Users', 'lastMonthlySummarySentFor', {
+        type: DataTypes.STRING(7),
+        allowNull: true,
+      });
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query(
       'SELECT id FROM `Users` WHERE `publicId` IS NULL',

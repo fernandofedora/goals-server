@@ -1,3 +1,5 @@
+import { formatMoney } from './money.js';
+
 // HTML for transactional mail. Pure functions (no SMTP) so they can be tested
 // and previewed. Email clients ignore <style> blocks and most modern CSS, so
 // the layout is tables with inline styles, and the brand mark is HTML rather
@@ -219,5 +221,133 @@ export function budgetAlertEmail({ name, language, categoryName, threshold, spen
       footerNote: c.footer,
     }),
     text: `${c.greeting(name)}\n\n${c.body(categoryName, spent, budget, percent).replace(/<\/?strong>/g, '')}\n\n${hint}\n\n${c.cta}: ${url}\n\n${c.footer}\n`,
+  };
+}
+
+const MONTHLY_COPY = {
+  es: {
+    subject: (month) => `Tu resumen de ${month}`,
+    preheader: (income, expense) => `Ingresos ${income} · Gastos ${expense}`,
+    greeting: (name) => `Hola, ${name}`,
+    intro: (month) => `Así cerró ${month} en Goals.`,
+    income: 'Ingresos',
+    expense: 'Gastos',
+    net: 'Balance',
+    savingsRate: 'Ahorraste',
+    savingsRateValue: (pct) => `${pct}% de tus ingresos`,
+    topCategories: 'Donde más gastaste',
+    uncategorized: 'Sin categoría',
+    overBudgets: 'Presupuestos que se pasaron',
+    overBudget: (spent, available) => `${spent} de ${available}`,
+    savings: 'Metas de ahorro',
+    savingsLine: (saved, target, pct) => `${saved} de ${target} (${pct}%)`,
+    cta: 'Ver el detalle en Goals',
+    footer: 'Recibes este resumen el primer día de cada mes.',
+    unsubscribe: 'Dejar de recibirlo',
+  },
+  en: {
+    subject: (month) => `Your ${month} summary`,
+    preheader: (income, expense) => `Income ${income} · Expenses ${expense}`,
+    greeting: (name) => `Hi ${name}`,
+    intro: (month) => `Here's how ${month} closed in Goals.`,
+    income: 'Income',
+    expense: 'Expenses',
+    net: 'Balance',
+    savingsRate: 'You saved',
+    savingsRateValue: (pct) => `${pct}% of your income`,
+    topCategories: 'Where you spent the most',
+    uncategorized: 'Uncategorized',
+    overBudgets: 'Budgets that went over',
+    overBudget: (spent, available) => `${spent} of ${available}`,
+    savings: 'Savings goals',
+    savingsLine: (saved, target, pct) => `${saved} of ${target} (${pct}%)`,
+    cta: 'See the details in Goals',
+    footer: 'You get this summary on the first day of every month.',
+    unsubscribe: 'Stop sending it',
+  },
+};
+
+const h2 = (text) =>
+  `<h2 style="margin:24px 0 8px;font-size:15px;line-height:1.4;font-weight:700;color:${INK};">${text}</h2>`;
+
+/** Two-column rows: label on the left, value on the right. */
+const rows = (items) => `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+  ${items
+    .map(
+      ([label, value, color]) => `<tr>
+    <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;color:${MUTED};">${label}</td>
+    <td align="right" style="padding:8px 0;border-bottom:1px solid #f0f0f0;font-weight:600;color:${color || INK};white-space:nowrap;">${value}</td>
+  </tr>`,
+    )
+    .join('')}
+</table>`;
+
+export function monthlySummaryEmail({ name, language, currency, month, summary, unsubscribeUrl }) {
+  const lang = pickLang(language);
+  const c = MONTHLY_COPY[lang];
+  const money = (n) => formatMoney(n, currency || 'USD', lang);
+  const monthName = new Intl.DateTimeFormat(lang === 'en' ? 'en-US' : 'es', {
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(month.year, month.month - 1, 1));
+  const subject = c.subject(monthName);
+  const s = summary;
+
+  const totals = [
+    [c.income, money(s.income), BRAND],
+    [c.expense, money(s.expense), '#b91c1c'],
+    [c.net, money(s.net)],
+  ];
+  if (s.savingsRate !== null && s.savingsRate > 0) {
+    totals.push([c.savingsRate, c.savingsRateValue(s.savingsRate)]);
+  }
+
+  const categoryName = (n) => escapeHtml(n ?? c.uncategorized);
+  const sections = [];
+  const text = [`${c.greeting(name)}`, '', c.intro(monthName), ''];
+  text.push(...totals.map(([l, v]) => `${l}: ${v}`), '');
+
+  if (s.topCategories.length) {
+    sections.push(
+      h2(c.topCategories) +
+        rows(s.topCategories.map((t) => [categoryName(t.name), `${money(t.amount)} · ${t.share}%`])),
+    );
+    text.push(c.topCategories, ...s.topCategories.map((t) => `- ${t.name ?? c.uncategorized}: ${money(t.amount)} (${t.share}%)`), '');
+  }
+  if (s.overBudgets.length) {
+    sections.push(
+      h2(c.overBudgets) +
+        rows(s.overBudgets.map((b) => [escapeHtml(b.name), c.overBudget(money(b.spent), money(b.available)), '#b91c1c'])),
+    );
+    text.push(c.overBudgets, ...s.overBudgets.map((b) => `- ${b.name}: ${c.overBudget(money(b.spent), money(b.available))}`), '');
+  }
+  if (s.savings.length) {
+    sections.push(
+      h2(c.savings) +
+        rows(s.savings.map((p) => [escapeHtml(p.name), c.savingsLine(money(p.saved), money(p.target), p.percent)])),
+    );
+    text.push(c.savings, ...s.savings.map((p) => `- ${p.name}: ${c.savingsLine(money(p.saved), money(p.target), p.percent)}`), '');
+  }
+
+  const home = appUrl() || '/';
+  const footerNote = `${c.footer} <a href="${escapeHtml(unsubscribeUrl)}" style="color:${MUTED};">${c.unsubscribe}</a>`;
+  text.push(`${c.cta}: ${home}`, '', `${c.footer} ${c.unsubscribe}: ${unsubscribeUrl}`);
+
+  return {
+    subject,
+    html: renderLayout({
+      lang,
+      title: subject,
+      preheader: c.preheader(money(s.income), money(s.expense)),
+      bodyHtml:
+        h1(c.greeting(escapeHtml(name))) +
+        p(c.intro(escapeHtml(monthName))) +
+        rows(totals) +
+        sections.join('') +
+        button(home, c.cta),
+      footerNote,
+    }),
+    text: `${text.join('\n')}\n`,
   };
 }

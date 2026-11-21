@@ -6,19 +6,9 @@ import {
   budgetsCovering,
   localToday,
 } from './spendingBudgets.js';
+import { formatMoney } from '../utils/money.js';
 
 const THRESHOLDS = [80, 100];
-
-const formatMoney = (amount, currency, language) => {
-  try {
-    return new Intl.NumberFormat(language === 'en' ? 'en-US' : 'es', {
-      style: 'currency',
-      currency,
-    }).format(amount);
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`;
-  }
-};
 
 /**
  * After an expense in `categoryId` (with `tagIds`) on `date`, email the user
