@@ -11,20 +11,75 @@ export async function resolveFx(quoteCurrency, userCurrency) {
     : { fxRate: 1, currency: quoteCurrency, fxUnavailable: true };
 }
 
+// Shares below this count as zero (sells are stored with 8 decimals).
+const EPSILON = 1e-8;
+// Same day: buys first, then dividends, then sells, so selling what was
+// bought that morning works whatever order the rows were typed in.
+const TYPE_ORDER = { buy: 0, dividend: 1, sell: 2 };
+
+/** Movements in the order they happened. */
+export const sortMovements = (movements) =>
+  [...movements].sort(
+    (a, b) =>
+      String(a.date).localeCompare(String(b.date)) ||
+      (TYPE_ORDER[a.type || 'buy'] ?? 0) - (TYPE_ORDER[b.type || 'buy'] ?? 0) ||
+      (a.id ?? Infinity) - (b.id ?? Infinity),
+  );
+
 /**
- * Cost of a holding in the user's currency. Purchases recorded in the user's
+ * A movement's amount in the user's currency. Rows recorded in the user's
  * current currency keep their historical FX; older ones (the user changed
  * currency since) are converted at today's rate.
  */
-export const costInUserCurrency = (purchases, fx) =>
-  purchases.reduce(
-    (s, p) =>
-      s +
-      (p.userCurrency === fx.currency
-        ? Number(p.amountUser)
-        : Number(p.amountQuote) * fx.fxRate),
-    0,
-  );
+const userAmount = (m, fx) =>
+  m.userCurrency === fx.currency
+    ? Number(m.amountUser)
+    : Number(m.amountQuote) * fx.fxRate;
+
+/**
+ * Position of one holding after its buys, sells and dividends, with average
+ * cost: a sale takes out its share of the cost, and what it brought in above
+ * that cost is realized gain. `invalid` is the first sale of more shares than
+ * were held at that date (the totals stop there).
+ */
+export function holdingPosition(movements, fx = { currency: null, fxRate: 1 }) {
+  const pos = {
+    shares: 0,
+    costQuote: 0,
+    costUser: 0,
+    realizedUser: 0,
+    dividendsUser: 0,
+    invalid: null,
+  };
+  for (const m of sortMovements(movements)) {
+    const type = m.type || 'buy';
+    const shares = Number(m.shares);
+    if (type === 'buy') {
+      pos.shares += shares;
+      pos.costQuote += Number(m.amountQuote);
+      pos.costUser += userAmount(m, fx);
+    } else if (type === 'dividend') {
+      pos.dividendsUser += userAmount(m, fx);
+    } else {
+      if (shares > pos.shares + EPSILON) {
+        pos.invalid = m;
+        break;
+      }
+      const ratio = pos.shares > 0 ? Math.min(1, shares / pos.shares) : 1;
+      const costOutUser = pos.costUser * ratio;
+      pos.realizedUser += userAmount(m, fx) - costOutUser;
+      pos.costQuote -= pos.costQuote * ratio;
+      pos.costUser -= costOutUser;
+      pos.shares -= shares;
+      if (pos.shares < EPSILON) {
+        pos.shares = 0;
+        pos.costQuote = 0;
+        pos.costUser = 0;
+      }
+    }
+  }
+  return pos;
+}
 
 /**
  * Portfolio value in the user's currency, counted like the investments page
@@ -49,7 +104,7 @@ export async function portfolioValue(userId, userCurrency, atDate = null) {
     for (const h of holdings) {
       const fx = await resolveFx(h.quoteCurrency, userCurrency);
       if (!fx.fxUnavailable)
-        total += costInUserCurrency(h.InvestmentPurchases || [], fx);
+        total += holdingPosition(h.InvestmentPurchases || [], fx).costUser;
     }
     return Math.round(total * 100) / 100;
   }
@@ -65,10 +120,7 @@ export async function portfolioValue(userId, userCurrency, atDate = null) {
     const quote = quotes.get(h.providerSymbol);
     const fx = await resolveFx(h.quoteCurrency, userCurrency);
     if (!quote || fx.fxUnavailable) continue;
-    const shares = (h.InvestmentPurchases || []).reduce(
-      (s, p) => s + Number(p.shares),
-      0,
-    );
+    const { shares } = holdingPosition(h.InvestmentPurchases || [], fx);
     total += shares * quote.price * fx.fxRate;
   }
   return Math.round(total * 100) / 100;

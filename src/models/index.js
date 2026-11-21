@@ -363,6 +363,13 @@ export const InvestmentHolding = sequelize.define(
 // user's currency includes both price and exchange-rate effects.
 export const InvestmentPurchase = sequelize.define('InvestmentPurchase', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  // buy: shares in, amount paid. sell: shares out, amount received.
+  // dividend: cash received, no shares (shares and price are 0).
+  type: {
+    type: DataTypes.ENUM('buy', 'sell', 'dividend'),
+    allowNull: false,
+    defaultValue: 'buy',
+  },
   date: { type: DataTypes.DATEONLY, allowNull: false },
   shares: { type: DataTypes.DECIMAL(18, 8), allowNull: false },
   pricePerShare: { type: DataTypes.DECIMAL(18, 6), allowNull: false },

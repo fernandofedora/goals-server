@@ -344,6 +344,18 @@ export const connectDB = async () => {
         allowNull: true,
       });
     }
+    // Investments: movements were all purchases before sells and dividends.
+    const descInvMoves = await qi
+      .describeTable('InvestmentPurchases')
+      .catch(() => null);
+    if (descInvMoves && !descInvMoves.type) {
+      await qi.addColumn('InvestmentPurchases', 'type', {
+        type: DataTypes.ENUM('buy', 'sell', 'dividend'),
+        allowNull: false,
+        defaultValue: 'buy',
+      });
+      console.log('Migration: added InvestmentPurchases.type column');
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query(
       'SELECT id FROM `Users` WHERE `publicId` IS NULL',
