@@ -20,6 +20,11 @@ import spendingBudgetsRoutes from './routes/spendingBudgets.js';
 // Separate from index.js so tests can mount the API without listening or booting the DB.
 export const app = express();
 
+// In production the app sits behind one reverse proxy (Hostinger/LiteSpeed).
+// Without this, req.ip is the proxy's address and the per-IP rate limits would
+// lump every user together. TRUST_PROXY overrides the hop count (0 = none).
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
+
 // Downloads name their file in Content-Disposition; browsers hide it from
 // another origin unless it is exposed.
 app.use(cors({ exposedHeaders: ['Content-Disposition'] }));
