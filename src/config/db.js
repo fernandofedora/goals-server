@@ -323,6 +323,21 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Users.monthlySummaryEnabled column');
     }
+    if (!desc.twoFactorEnabled) {
+      await qi.addColumn('Users', 'twoFactorEnabled', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
+      console.log('Migration: added Users.twoFactor* columns');
+    }
+    for (const [name, type] of [
+      ['twoFactorSecret', DataTypes.TEXT],
+      ['twoFactorRecoveryCodes', DataTypes.TEXT],
+      ['twoFactorLastStep', DataTypes.INTEGER],
+    ]) {
+      if (!desc[name]) await qi.addColumn('Users', name, { type, allowNull: true });
+    }
     if (!desc.lastMonthlySummarySentFor) {
       await qi.addColumn('Users', 'lastMonthlySummarySentFor', {
         type: DataTypes.STRING(7),

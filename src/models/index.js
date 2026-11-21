@@ -58,6 +58,14 @@ export const User = sequelize.define('User', {
   },
   // 'YYYY-MM' of the last summary sent, so a restart never sends it twice.
   lastMonthlySummarySentFor: { type: DataTypes.STRING(7), allowNull: true },
+  // Two-step sign-in (TOTP). The secret is encrypted (utils/twoFactor.js);
+  // before the user confirms a first code it is stored with enabled = false.
+  twoFactorEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  twoFactorSecret: { type: DataTypes.TEXT, allowNull: true },
+  // JSON array of sha256 hashes of the unused recovery codes.
+  twoFactorRecoveryCodes: { type: DataTypes.TEXT, allowNull: true },
+  // Last accepted time step, so a code can't be used twice.
+  twoFactorLastStep: { type: DataTypes.INTEGER, allowNull: true },
 });
 
 export const Category = sequelize.define('Category', {

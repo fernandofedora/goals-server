@@ -26,6 +26,7 @@
     "mysql2": "^3.15.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^10.1.7",
+    "qrcode": "^1.5.4",
     "sequelize": "^6.37.7",
     "uuid": "^14.0.0"
   },

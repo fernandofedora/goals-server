@@ -4,6 +4,16 @@ import { authMiddleware } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { User } from '../models/index.js';
 import { isStrongPassword } from '../utils/password.js';
+import QRCode from 'qrcode';
+import { generateSecret, otpauthUrl, verifyTotp } from '../utils/totp.js';
+import {
+  consumeRecoveryCode,
+  decryptSecret,
+  encryptSecret,
+  generateRecoveryCodes,
+  isTwoFactorConfigured,
+  remainingRecoveryCodes,
+} from '../utils/twoFactor.js';
 import {
   UNSUBSCRIBE_LISTS,
   isValidUnsubscribeToken,
@@ -27,6 +37,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       language: user.language || 'en',
       budgetAlertsEnabled: user.budgetAlertsEnabled,
       monthlySummaryEnabled: user.monthlySummaryEnabled,
+      twoFactorEnabled: user.twoFactorEnabled,
     });
   } catch (e) {
     res.status(500).json({ message: 'Server error' });
@@ -71,6 +82,7 @@ router.put(
         language: user.language || 'en',
         budgetAlertsEnabled: user.budgetAlertsEnabled,
       monthlySummaryEnabled: user.monthlySummaryEnabled,
+      twoFactorEnabled: user.twoFactorEnabled,
       });
     } catch (e) {
       res.status(500).json({ message: 'Server error' });
@@ -104,6 +116,102 @@ router.post(
     }
   },
 );
+
+// ── Two-step sign-in (TOTP) ────────────────────────────────────────────────
+const twoFactorLimit = rateLimit((req) => `2fa-setup:${req.userId}`, {
+  limit: 10,
+  windowMs: 15 * 60 * 1000,
+});
+
+router.get('/2fa', authMiddleware, async (req, res) => {
+  const user = await User.findByPk(req.userId);
+  if (!user) return res.status(404).json({ message: 'User not found' });
+  res.json({
+    enabled: user.twoFactorEnabled,
+    available: isTwoFactorConfigured(),
+    recoveryCodesLeft: user.twoFactorEnabled
+      ? remainingRecoveryCodes(user.twoFactorRecoveryCodes)
+      : 0,
+  });
+});
+
+// Step 1: password again, then a new secret to scan. Not active until /enable.
+router.post('/2fa/setup', authMiddleware, twoFactorLimit, async (req, res) => {
+  try {
+    if (!isTwoFactorConfigured())
+      return res.status(503).json({ message: 'Two-factor is not available' });
+    const user = await User.findByPk(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.twoFactorEnabled)
+      return res.status(400).json({ message: 'Two-factor is already on' });
+    const ok = await bcrypt.compare(String(req.body?.password || ''), user.passwordHash);
+    if (!ok) return res.status(400).json({ message: 'Invalid current password' });
+
+    const secret = generateSecret();
+    await user.update({ twoFactorSecret: encryptSecret(secret), twoFactorLastStep: null });
+    const url = otpauthUrl({ secret, account: user.email });
+    res.json({ secret, otpauthUrl: url, qr: await QRCode.toDataURL(url, { margin: 1, width: 220 }) });
+  } catch (e) {
+    console.error('2FA setup failed:', e.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Step 2: the first code proves the app is set up. Returns the recovery
+// codes; this is the only time they are shown.
+router.post('/2fa/enable', authMiddleware, twoFactorLimit, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.twoFactorEnabled)
+      return res.status(400).json({ message: 'Two-factor is already on' });
+    if (!user.twoFactorSecret)
+      return res.status(400).json({ message: 'Invalid code' });
+    const step = verifyTotp(decryptSecret(user.twoFactorSecret), req.body?.code);
+    if (step === null) return res.status(400).json({ message: 'Invalid code' });
+
+    const { codes, stored } = generateRecoveryCodes();
+    await user.update({
+      twoFactorEnabled: true,
+      twoFactorLastStep: step,
+      twoFactorRecoveryCodes: stored,
+    });
+    res.json({ enabled: true, recoveryCodes: codes });
+  } catch (e) {
+    console.error('2FA enable failed:', e.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Turning it off needs the password and a code (or a recovery code), so a
+// stolen session alone can't remove it.
+router.post('/2fa/disable', authMiddleware, twoFactorLimit, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.twoFactorEnabled) return res.json({ enabled: false });
+    const { password, code, recoveryCode } = req.body || {};
+    const ok = await bcrypt.compare(String(password || ''), user.passwordHash);
+    if (!ok) return res.status(400).json({ message: 'Invalid current password' });
+    const valid = recoveryCode
+      ? consumeRecoveryCode(user.twoFactorRecoveryCodes, recoveryCode) !== null
+      : verifyTotp(decryptSecret(user.twoFactorSecret), code, {
+          lastStep: user.twoFactorLastStep,
+        }) !== null;
+    if (!valid) return res.status(400).json({ message: 'Invalid code' });
+
+    await user.update({
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      twoFactorRecoveryCodes: null,
+      twoFactorLastStep: null,
+    });
+    res.json({ enabled: false });
+  } catch (e) {
+    console.error('2FA disable failed:', e.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // From the link in an email: no session, the signed token proves the link
 // came from us. Answers the same for an unknown user and a bad token.

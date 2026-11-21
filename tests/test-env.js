@@ -23,5 +23,6 @@ export function applyTestEnv() {
   process.env.MYSQLDATABASE = database;
   process.env.MYSQLHOST = host;
   process.env.SECRET_KEY = 'test-secret';
+  process.env.TWO_FACTOR_KEY = 'test-two-factor-key-with-32-chars!!';
   return database;
 }
