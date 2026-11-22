@@ -155,19 +155,46 @@ export async function portfolioValue(userId, userCurrency, atDate = null) {
     return Math.round(total * 100) / 100;
   }
 
+  return (await totalsOf(holdings, userCurrency)).value;
+}
+
+async function totalsOf(holdings, userCurrency) {
   const quotes = await getQuotes(
     holdings.map((h) => ({
       providerSymbol: h.providerSymbol,
       currency: h.quoteCurrency,
     })),
   );
-  let total = 0;
+  let value = 0;
+  let cost = 0;
+  let counted = 0;
   for (const h of holdings) {
     const quote = quotes.get(h.providerSymbol);
     const fx = await resolveFx(h.quoteCurrency, userCurrency);
     if (!quote || fx.fxUnavailable) continue;
-    const { shares } = holdingPosition(h.InvestmentPurchases || [], fx);
-    total += shares * quote.price * fx.fxRate;
+    const movements = await withHistoricalAmounts(
+      h.InvestmentPurchases || [],
+      h.quoteCurrency,
+      fx.currency,
+    );
+    const pos = holdingPosition(movements, fx);
+    value += pos.shares * quote.price * fx.fxRate;
+    cost += pos.costUser;
+    counted += 1;
   }
-  return Math.round(total * 100) / 100;
+  const round2 = (n) => Math.round(n * 100) / 100;
+  return { value: round2(value), cost: round2(cost), counted };
+}
+
+/**
+ * Value and cost of the active holdings, counted like the investments page
+ * totals (only those with a price and a known exchange rate).
+ */
+export async function portfolioTotals(userId, userCurrency) {
+  const holdings = await InvestmentHolding.findAll({
+    where: { UserId: userId, status: 'active' },
+    include: [InvestmentPurchase],
+  });
+  if (!holdings.length) return { value: 0, cost: 0, counted: 0 };
+  return totalsOf(holdings, userCurrency);
 }

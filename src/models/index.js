@@ -423,6 +423,21 @@ export const FxRate = sequelize.define('FxRate', {
   fetchedAt: { type: DataTypes.DATE, allowNull: false },
 });
 
+// Investments page totals once a day (value at market price and cost, in the
+// user's currency at the time), for the evolution chart.
+export const PortfolioSnapshot = sequelize.define(
+  'PortfolioSnapshot',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    date: { type: DataTypes.DATEONLY, allowNull: false },
+    value: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+    cost: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+    currency: { type: DataTypes.STRING(10), allowNull: false },
+  },
+  { indexes: [{ unique: true, name: 'portfolio_day', fields: ['UserId', 'date'] }] },
+);
+
 // Daily FX history, base USD: what 1 USD was worth in `currency` on `date`.
 // Filled by every refresh of FxRate and, for older dates, on demand.
 export const FxRateDaily = sequelize.define(

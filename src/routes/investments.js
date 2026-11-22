@@ -19,6 +19,11 @@ import {
 } from '../services/marketData/index.js';
 import { getRatesDate } from '../services/fx.js';
 import {
+  HISTORY_RANGES,
+  portfolioHistory,
+  savePortfolioSnapshot,
+} from '../services/portfolioHistory.js';
+import {
   gainSplit,
   holdingPosition,
   resolveFx,
@@ -299,6 +304,16 @@ router.get('/', async (req, res) => {
         ? round((i.valueUser / totalValue) * 100, 2)
         : null;
   }
+  // Today's point of the evolution chart (the cron saves it too). Never
+  // delays or fails the response.
+  if (counted.length) {
+    savePortfolioSnapshot(
+      req.userId,
+      { value: round(totalValue, 2), cost: round(totalCost, 2) },
+      userCurrency,
+    ).catch((err) => console.error('Portfolio snapshot failed:', err.message));
+  }
+
   const quotedTimes = items
     .map((i) => i.quotedAt)
     .filter(Boolean)
@@ -331,6 +346,17 @@ router.get('/', async (req, res) => {
           : null,
     },
     holdings: items,
+  });
+});
+
+// GET /api/investments/history?range=1m|3m|6m|1y|all — daily value and cost
+router.get('/history', async (req, res) => {
+  const range = Object.hasOwn(HISTORY_RANGES, req.query.range) ? req.query.range : '3m';
+  const currency = await getUserCurrency(req.userId);
+  res.json({
+    currency,
+    range,
+    points: await portfolioHistory(req.userId, currency, range),
   });
 });
 
