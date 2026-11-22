@@ -423,6 +423,21 @@ export const FxRate = sequelize.define('FxRate', {
   fetchedAt: { type: DataTypes.DATE, allowNull: false },
 });
 
+// Daily FX history, base USD: what 1 USD was worth in `currency` on `date`.
+// Filled by every refresh of FxRate and, for older dates, on demand.
+export const FxRateDaily = sequelize.define(
+  'FxRateDaily',
+  {
+    date: { type: DataTypes.DATEONLY, allowNull: false },
+    currency: { type: DataTypes.STRING(10), allowNull: false },
+    ratePerUsd: { type: DataTypes.DECIMAL(24, 10), allowNull: false },
+  },
+  {
+    tableName: 'FxRateDaily',
+    indexes: [{ unique: true, fields: ['date', 'currency'], name: 'uniq_fx_daily' }],
+  },
+);
+
 // Associations
 User.hasMany(Category);
 Category.belongsTo(User);

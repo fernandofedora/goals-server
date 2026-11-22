@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import { InvestmentHolding, InvestmentPurchase } from '../models/index.js';
 import { getQuotes } from './marketData/index.js';
-import { getRate } from './fx.js';
+import { getHistoricalRates, getRate } from './fx.js';
 
 /** Rate to show an asset in the user's currency, or its own when unknown. */
 export async function resolveFx(quoteCurrency, userCurrency) {
@@ -27,9 +27,32 @@ export const sortMovements = (movements) =>
   );
 
 /**
- * A movement's amount in the user's currency. Rows recorded in the user's
- * current currency keep their historical FX; older ones (the user changed
- * currency since) are converted at today's rate.
+ * Movements recorded in another currency (the user changed theirs since)
+ * get their amount in `currency` at the rate of their own date. The ones
+ * with no known rate for that date keep `estimated: true` and are converted
+ * at today's rate by holdingPosition.
+ */
+export async function withHistoricalAmounts(movements, quoteCurrency, currency) {
+  const plain = (m) => (typeof m.get === 'function' ? m.get({ plain: true }) : { ...m });
+  const others = movements.filter((m) => m.userCurrency !== currency);
+  if (!others.length) return movements;
+  const rates = await getHistoricalRates(
+    quoteCurrency,
+    currency,
+    others.map((m) => m.date),
+  );
+  return movements.map((m) => {
+    if (m.userCurrency === currency) return m;
+    const rate = rates.get(String(m.date).slice(0, 10));
+    return rate
+      ? { ...plain(m), userCurrency: currency, amountUser: Number(m.amountQuote) * rate }
+      : { ...plain(m), estimated: true };
+  });
+}
+
+/**
+ * A movement's amount in the user's currency. Rows recorded in it keep the
+ * rate of their date; anything else is converted at today's rate.
  */
 const userAmount = (m, fx) =>
   m.userCurrency === fx.currency
@@ -49,10 +72,13 @@ export function holdingPosition(movements, fx = { currency: null, fxRate: 1 }) {
     costUser: 0,
     realizedUser: 0,
     dividendsUser: 0,
+    // Some amount used today's rate because its date's was unknown.
+    fxEstimated: false,
     invalid: null,
   };
   for (const m of sortMovements(movements)) {
     const type = m.type || 'buy';
+    if (m.estimated) pos.fxEstimated = true;
     const shares = Number(m.shares);
     if (type === 'buy') {
       pos.shares += shares;
@@ -118,8 +144,13 @@ export async function portfolioValue(userId, userCurrency, atDate = null) {
     let total = 0;
     for (const h of holdings) {
       const fx = await resolveFx(h.quoteCurrency, userCurrency);
-      if (!fx.fxUnavailable)
-        total += holdingPosition(h.InvestmentPurchases || [], fx).costUser;
+      if (fx.fxUnavailable) continue;
+      const movements = await withHistoricalAmounts(
+        h.InvestmentPurchases || [],
+        h.quoteCurrency,
+        fx.currency,
+      );
+      total += holdingPosition(movements, fx).costUser;
     }
     return Math.round(total * 100) / 100;
   }

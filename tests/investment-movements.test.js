@@ -18,6 +18,7 @@ vi.mock('../src/services/fx.js', () => ({
   getRate: async (from, to) =>
     from === to ? 1 : from === 'USD' && to === 'NIO' ? 36.6 : null,
   getRatesDate: async () => new Date('2026-11-20T00:00:00Z'),
+  getHistoricalRates: async () => new Map(),
 }));
 
 const usd = { currency: 'USD', fxRate: 1 };

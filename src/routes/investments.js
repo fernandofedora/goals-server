@@ -18,7 +18,12 @@ import {
   toAssetType,
 } from '../services/marketData/index.js';
 import { getRatesDate } from '../services/fx.js';
-import { gainSplit, holdingPosition, resolveFx } from '../services/portfolio.js';
+import {
+  gainSplit,
+  holdingPosition,
+  resolveFx,
+  withHistoricalAmounts,
+} from '../services/portfolio.js';
 
 // Experimental investments module. Independent by design: it never touches
 // Transactions, Accounts, Cards or Categories. The net worth (stats) only reads
@@ -228,7 +233,10 @@ router.get('/', async (req, res) => {
     const quote = quotes.get(h.providerSymbol) || null;
     const purchases = h.InvestmentPurchases || [];
 
-    const pos = holdingPosition(purchases, fx);
+    const pos = holdingPosition(
+      await withHistoricalAmounts(purchases, h.quoteCurrency, fx.currency),
+      fx,
+    );
     const { shares, costQuote, costUser } = pos;
     const valueQuote = quote ? shares * quote.price : null;
     const valueUser = valueQuote != null ? valueQuote * fx.fxRate : null;
@@ -263,6 +271,8 @@ router.get('/', async (req, res) => {
       // Already cashed: sales above their average cost, and dividends.
       realizedUser: round(pos.realizedUser, 2),
       dividendsUser: round(pos.dividendsUser, 2),
+      // Cost of some old movement converted at today's rate (no history).
+      costFxEstimated: pos.fxEstimated,
       soldOut: shares === 0 && purchases.some((p) => p.type === 'sell'),
       dayChangeUser:
         quote?.change != null
