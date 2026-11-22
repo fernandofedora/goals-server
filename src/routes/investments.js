@@ -18,7 +18,7 @@ import {
   toAssetType,
 } from '../services/marketData/index.js';
 import { getRatesDate } from '../services/fx.js';
-import { holdingPosition, resolveFx } from '../services/portfolio.js';
+import { gainSplit, holdingPosition, resolveFx } from '../services/portfolio.js';
 
 // Experimental investments module. Independent by design: it never touches
 // Transactions, Accounts, Cards or Categories. The net worth (stats) only reads
@@ -233,6 +233,7 @@ router.get('/', async (req, res) => {
     const valueQuote = quote ? shares * quote.price : null;
     const valueUser = valueQuote != null ? valueQuote * fx.fxRate : null;
     const gainUser = valueUser != null ? valueUser - costUser : null;
+    const split = gainSplit({ valueQuote, costQuote, costUser, fxRate: fx.fxRate });
 
     items.push({
       ...formatHoldingBase(h),
@@ -254,6 +255,11 @@ router.get('/', async (req, res) => {
         gainUser != null && costUser > 0
           ? round((gainUser / costUser) * 100, 2)
           : null,
+      // Open gain split: what the price did vs. what the exchange rate did.
+      // The price part is taken from the rounded figures so both always add
+      // up to the gain shown, to the cent.
+      gainPriceUser: split ? round(round(gainUser, 2) - round(split.fx, 2), 2) : null,
+      gainFxUser: split ? round(split.fx, 2) : null,
       // Already cashed: sales above their average cost, and dividends.
       realizedUser: round(pos.realizedUser, 2),
       dividendsUser: round(pos.dividendsUser, 2),
@@ -273,6 +279,7 @@ router.get('/', async (req, res) => {
   const totalValue = counted.reduce((s, i) => s + i.valueUser, 0);
   const totalCost = counted.reduce((s, i) => s + i.costUser, 0);
   const dayChange = counted.reduce((s, i) => s + (i.dayChangeUser || 0), 0);
+  const gainFx = counted.reduce((s, i) => s + (i.gainFxUser || 0), 0);
   const inUserCurrency = items.filter((i) => !i.fxUnavailable);
   const realized = inUserCurrency.reduce((s, i) => s + i.realizedUser, 0);
   const dividends = inUserCurrency.reduce((s, i) => s + i.dividendsUser, 0);
@@ -300,6 +307,9 @@ router.get('/', async (req, res) => {
         totalCost > 0
           ? round(((totalValue - totalCost) / totalCost) * 100, 2)
           : null,
+      // gain = gainPrice + gainFx (gainFx is 0 when nothing is converted).
+      gainPrice: round(totalValue - totalCost - gainFx, 2),
+      gainFx: round(gainFx, 2),
       realized: round(realized, 2),
       dividends: round(dividends, 2),
       // What the investments have earned so far: open gain + cashed.

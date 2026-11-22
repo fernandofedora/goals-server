@@ -82,6 +82,21 @@ export function holdingPosition(movements, fx = { currency: null, fxRate: 1 }) {
 }
 
 /**
+ * Splits an open gain (value − cost, in the user's currency) into what the
+ * price did and what the exchange rate did:
+ *   price: (value − cost) in the quote currency, at today's rate
+ *   fx:    the cost basis at today's rate − what it cost at the rates paid
+ * The two always add up to the gain. Null without a price.
+ */
+export function gainSplit({ valueQuote, costQuote, costUser, fxRate }) {
+  if (valueQuote == null) return null;
+  return {
+    price: (valueQuote - costQuote) * fxRate,
+    fx: costQuote * fxRate - costUser,
+  };
+}
+
+/**
  * Portfolio value in the user's currency, counted like the investments page
  * total: only holdings with a price and a known exchange rate.
  * With `atDate` (a past month end) it is the cost of what had been bought by
