@@ -37,7 +37,7 @@ router.get('/users', async (req, res) => {
 
     const { count, rows } = await User.findAndCountAll({
       where,
-      attributes: ['id', 'publicId', 'name', 'email', 'isActive', 'isSuperAdmin', 'canAccessInvestments', 'lastLoginAt', 'createdAt'],
+      attributes: ['id', 'publicId', 'name', 'email', 'isActive', 'isSuperAdmin', 'canAccessInvestments', 'twoFactorEnabled', 'lastLoginAt', 'createdAt'],
       order: [['createdAt', 'DESC']],
       limit: parseInt(limit),
       offset
@@ -139,6 +139,26 @@ router.post('/users/:id/reset-password', async (req, res) => {
       tempPassword,  // shown once in the frontend modal – will be replaced by email when SMTP is added
       message: `Temporary password set for ${user.name}. Share it securely.`
     });
+  } catch (e) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ─── PATCH /api/admin/users/:id/reset-2fa ────────────────────────────────────
+// For a user who lost both the authenticator and the recovery codes. They sign
+// in with the password alone and can set it up again.
+router.patch('/users/:id/reset-2fa', async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    await user.update({
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      twoFactorRecoveryCodes: null,
+      twoFactorLastStep: null,
+    });
+    console.log(`Admin ${req.userId} reset 2FA of user ${user.id}`);
+    res.json({ success: true, twoFactorEnabled: false });
   } catch (e) {
     res.status(500).json({ message: 'Server error' });
   }
