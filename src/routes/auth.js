@@ -8,6 +8,13 @@ import { addSuggestedCategories } from '../utils/categoryCatalog.js';
 import { sendVerificationEmail, sendResetPasswordEmail } from '../utils/mail.js';
 import { rateLimit, bodyEmail } from '../middleware/rateLimit.js';
 import { hashResetToken, isAcceptablePassword } from '../utils/password.js';
+import { verifyTotp } from '../utils/totp.js';
+import {
+  TWO_FACTOR_PURPOSE,
+  TWO_FACTOR_TTL,
+  consumeRecoveryCode,
+  decryptSecret,
+} from '../utils/twoFactor.js';
 
 const router = express.Router();
 
@@ -23,6 +30,14 @@ const byIp = (scope, limit, windowMs) =>
   rateLimit((req) => `${scope}:ip:${req.ip}`, { limit, windowMs });
 const byEmail = (scope, limit, windowMs) =>
   rateLimit((req) => `${scope}:email:${bodyEmail(req)}`, { limit, windowMs });
+
+/** Signs a 7-day session and answers like a finished login. */
+async function sendSession(res, user) {
+  const token = jwt.sign({ id: user.id, isSuperAdmin: user.isSuperAdmin }, process.env.SECRET_KEY, { expiresIn: '7d' });
+  const now = new Date();
+  await user.update({ lastLoginAt: now });
+  res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email, createdAt: user.createdAt, lastLoginAt: now, isSuperAdmin: user.isSuperAdmin, canAccessInvestments: user.canAccessInvestments } });
+}
 
 router.post('/register', byIp('register', 10, 60 * MINUTE), async (req, res) => {
   try {
@@ -55,7 +70,7 @@ router.post('/register', byIp('register', 10, 60 * MINUTE), async (req, res) => 
     }
 
     try {
-      await sendVerificationEmail(email, name, verificationToken);
+      await sendVerificationEmail(email, name, verificationToken, user.language);
     } catch (mailErr) {
       console.error('Failed to send verification email:', mailErr);
       // We still registered the user, but they might need a way to resend the email
@@ -84,11 +99,63 @@ router.post(
     if (!user.isActive) return res.status(403).json({ message: 'Cuenta desactivada. Contacta a un administrador.' });
     if (!user.isEmailVerified) return res.status(403).json({ message: 'Por favor verifica tu correo electrónico para iniciar sesión.' });
 
-    const token = jwt.sign({ id: user.id, isSuperAdmin: user.isSuperAdmin }, process.env.SECRET_KEY, { expiresIn: '7d' });
-    const now = new Date();
-    await user.update({ lastLoginAt: now });
-    res.json({ token, user: { publicId: user.publicId, name: user.name, email: user.email, createdAt: user.createdAt, lastLoginAt: now, isSuperAdmin: user.isSuperAdmin, canAccessInvestments: user.canAccessInvestments } });
+    if (user.twoFactorEnabled) {
+      // Password is right; the session waits for the code.
+      const challengeToken = jwt.sign(
+        { id: user.id, purpose: TWO_FACTOR_PURPOSE },
+        process.env.SECRET_KEY,
+        { expiresIn: TWO_FACTOR_TTL },
+      );
+      return res.json({ twoFactorRequired: true, challengeToken });
+    }
+    await sendSession(res, user);
   } catch (e) { res.status(500).json({ message: 'Error del servidor' }); }
+  },
+);
+
+const challengeUserId = (req) => {
+  const payload = jwt.decode(String(req.body?.challengeToken || ''));
+  return payload && typeof payload === 'object' ? payload.id : 'none';
+};
+
+// Second step: a code from the authenticator app or one recovery code.
+router.post(
+  '/2fa/verify',
+  byIp('2fa', 20, 15 * MINUTE),
+  rateLimit((req) => `2fa:user:${challengeUserId(req)}`, { limit: 5, windowMs: 5 * MINUTE }),
+  async (req, res) => {
+    try {
+      const { challengeToken, code, recoveryCode } = req.body || {};
+      let payload;
+      try {
+        payload = jwt.verify(String(challengeToken || ''), process.env.SECRET_KEY);
+      } catch {
+        return res.status(401).json({ message: 'Two-factor session expired' });
+      }
+      if (payload.purpose !== TWO_FACTOR_PURPOSE) {
+        return res.status(401).json({ message: 'Two-factor session expired' });
+      }
+      const user = await User.findByPk(payload.id);
+      if (!user || !user.isActive || !user.twoFactorEnabled) {
+        return res.status(401).json({ message: 'Two-factor session expired' });
+      }
+
+      if (recoveryCode) {
+        const left = consumeRecoveryCode(user.twoFactorRecoveryCodes, recoveryCode);
+        if (left === null) return res.status(400).json({ message: 'Invalid code' });
+        await user.update({ twoFactorRecoveryCodes: left });
+      } else {
+        const step = verifyTotp(decryptSecret(user.twoFactorSecret), code, {
+          lastStep: user.twoFactorLastStep,
+        });
+        if (step === null) return res.status(400).json({ message: 'Invalid code' });
+        await user.update({ twoFactorLastStep: step });
+      }
+      await sendSession(res, user);
+    } catch (e) {
+      console.error('2FA verify failed:', e.message);
+      res.status(500).json({ message: 'Error del servidor' });
+    }
   },
 );
 
@@ -127,7 +194,7 @@ router.post(
         resetPasswordToken: hashResetToken(resetToken),
         resetPasswordExpires: new Date(Date.now() + RESET_TOKEN_TTL_MS),
       });
-      sendResetPasswordEmail(user.email, user.name, resetToken).catch((mailErr) =>
+      sendResetPasswordEmail(user.email, user.name, resetToken, user.language).catch((mailErr) =>
         console.error('Failed to send reset email:', mailErr),
       );
     }

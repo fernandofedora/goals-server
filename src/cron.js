@@ -6,6 +6,8 @@ import { syncCatalog } from './services/marketData/index.js';
 import { getRates } from './services/fx.js';
 import { checkBudgetThresholds } from './services/budgetAlerts.js';
 import { recordNetWorthSnapshots } from './services/netWorth.js';
+import { sendMonthlySummaries } from './services/monthlySummary.js';
+import { recordPortfolioSnapshots } from './services/portfolioHistory.js';
 
 // Safety cap: never materialize more than this many occurrences for a single
 // payment in one catch-up pass, to guard against an unbounded loop on bad data.
@@ -251,4 +253,26 @@ cron.schedule('50 23 * * *', async () => {
   } catch (err) {
     console.error('Net worth snapshots failed:', err.message);
   }
+  try {
+    const saved = await recordPortfolioSnapshots();
+    console.log(`Portfolio snapshots saved: ${saved}`);
+  } catch (err) {
+    console.error('Portfolio snapshots failed:', err.message);
+  }
 });
+
+// Monthly summary: every morning, but it only sends on days 1-7 and once per
+// user and month (see services/monthlySummary.js). index.js also runs it at
+// startup, in case the host was asleep at 8:00. Opt-in per environment: a
+// local copy of the database must never email real users.
+export const runMonthlySummaries = async () => {
+  if (process.env.MONTHLY_SUMMARY_ENABLED !== 'true') return;
+  try {
+    const sent = await sendMonthlySummaries();
+    if (sent) console.log(`Monthly summaries sent: ${sent}`);
+  } catch (err) {
+    console.error('Monthly summaries failed:', err.message);
+  }
+};
+
+cron.schedule('0 8 * * *', runMonthlySummaries);

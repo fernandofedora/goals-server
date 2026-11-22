@@ -11,6 +11,7 @@ vi.mock('../src/utils/mail.js', () => ({
   sendVerificationEmail: vi.fn(async () => {}),
   sendResetPasswordEmail: vi.fn(async () => {}),
   sendBudgetAlertEmail: vi.fn(async () => {}),
+  sendMonthlySummaryEmail: vi.fn(async () => {}),
 }));
 
 afterAll(async () => {

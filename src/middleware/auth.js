@@ -7,6 +7,9 @@ export const authMiddleware = (req, res, next) => {
   const token = header.replace('Bearer ', '');
   try {
     const payload = jwt.verify(token, process.env.SECRET_KEY);
+    // Purpose tokens (e.g. the 2FA step between password and code) are not
+    // sessions: accepting one here would skip the second factor.
+    if (payload.purpose) throw new Error('Not a session token');
     req.userId = payload.id;
     req.isSuperAdmin = payload.isSuperAdmin || false;
     next();

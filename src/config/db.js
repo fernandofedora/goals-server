@@ -315,6 +315,47 @@ export const connectDB = async () => {
       });
       console.log('Migration: added Users.budgetAlertsEnabled column');
     }
+    if (!desc.monthlySummaryEnabled) {
+      await qi.addColumn('Users', 'monthlySummaryEnabled', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      });
+      console.log('Migration: added Users.monthlySummaryEnabled column');
+    }
+    if (!desc.twoFactorEnabled) {
+      await qi.addColumn('Users', 'twoFactorEnabled', {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      });
+      console.log('Migration: added Users.twoFactor* columns');
+    }
+    for (const [name, type] of [
+      ['twoFactorSecret', DataTypes.TEXT],
+      ['twoFactorRecoveryCodes', DataTypes.TEXT],
+      ['twoFactorLastStep', DataTypes.INTEGER],
+    ]) {
+      if (!desc[name]) await qi.addColumn('Users', name, { type, allowNull: true });
+    }
+    if (!desc.lastMonthlySummarySentFor) {
+      await qi.addColumn('Users', 'lastMonthlySummarySentFor', {
+        type: DataTypes.STRING(7),
+        allowNull: true,
+      });
+    }
+    // Investments: movements were all purchases before sells and dividends.
+    const descInvMoves = await qi
+      .describeTable('InvestmentPurchases')
+      .catch(() => null);
+    if (descInvMoves && !descInvMoves.type) {
+      await qi.addColumn('InvestmentPurchases', 'type', {
+        type: DataTypes.ENUM('buy', 'sell', 'dividend'),
+        allowNull: false,
+        defaultValue: 'buy',
+      });
+      console.log('Migration: added InvestmentPurchases.type column');
+    }
     const descCards = await qi.describeTable('Cards').catch(() => ({}));
     const [rows] = await sequelize.query(
       'SELECT id FROM `Users` WHERE `publicId` IS NULL',

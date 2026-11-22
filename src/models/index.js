@@ -50,6 +50,22 @@ export const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: true,
   },
+  // Email on the 1st with the previous month's summary.
+  monthlySummaryEnabled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  // 'YYYY-MM' of the last summary sent, so a restart never sends it twice.
+  lastMonthlySummarySentFor: { type: DataTypes.STRING(7), allowNull: true },
+  // Two-step sign-in (TOTP). The secret is encrypted (utils/twoFactor.js);
+  // before the user confirms a first code it is stored with enabled = false.
+  twoFactorEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  twoFactorSecret: { type: DataTypes.TEXT, allowNull: true },
+  // JSON array of sha256 hashes of the unused recovery codes.
+  twoFactorRecoveryCodes: { type: DataTypes.TEXT, allowNull: true },
+  // Last accepted time step, so a code can't be used twice.
+  twoFactorLastStep: { type: DataTypes.INTEGER, allowNull: true },
 });
 
 export const Category = sequelize.define('Category', {
@@ -347,6 +363,13 @@ export const InvestmentHolding = sequelize.define(
 // user's currency includes both price and exchange-rate effects.
 export const InvestmentPurchase = sequelize.define('InvestmentPurchase', {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+  // buy: shares in, amount paid. sell: shares out, amount received.
+  // dividend: cash received, no shares (shares and price are 0).
+  type: {
+    type: DataTypes.ENUM('buy', 'sell', 'dividend'),
+    allowNull: false,
+    defaultValue: 'buy',
+  },
   date: { type: DataTypes.DATEONLY, allowNull: false },
   shares: { type: DataTypes.DECIMAL(18, 8), allowNull: false },
   pricePerShare: { type: DataTypes.DECIMAL(18, 6), allowNull: false },
@@ -399,6 +422,36 @@ export const FxRate = sequelize.define('FxRate', {
   sourceUpdatedAt: { type: DataTypes.DATE, allowNull: true },
   fetchedAt: { type: DataTypes.DATE, allowNull: false },
 });
+
+// Investments page totals once a day (value at market price and cost, in the
+// user's currency at the time), for the evolution chart.
+export const PortfolioSnapshot = sequelize.define(
+  'PortfolioSnapshot',
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    UserId: { type: DataTypes.INTEGER, allowNull: false },
+    date: { type: DataTypes.DATEONLY, allowNull: false },
+    value: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+    cost: { type: DataTypes.DECIMAL(16, 2), allowNull: false },
+    currency: { type: DataTypes.STRING(10), allowNull: false },
+  },
+  { indexes: [{ unique: true, name: 'portfolio_day', fields: ['UserId', 'date'] }] },
+);
+
+// Daily FX history, base USD: what 1 USD was worth in `currency` on `date`.
+// Filled by every refresh of FxRate and, for older dates, on demand.
+export const FxRateDaily = sequelize.define(
+  'FxRateDaily',
+  {
+    date: { type: DataTypes.DATEONLY, allowNull: false },
+    currency: { type: DataTypes.STRING(10), allowNull: false },
+    ratePerUsd: { type: DataTypes.DECIMAL(24, 10), allowNull: false },
+  },
+  {
+    tableName: 'FxRateDaily',
+    indexes: [{ unique: true, fields: ['date', 'currency'], name: 'uniq_fx_daily' }],
+  },
+);
 
 // Associations
 User.hasMany(Category);

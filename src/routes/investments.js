@@ -18,7 +18,17 @@ import {
   toAssetType,
 } from '../services/marketData/index.js';
 import { getRatesDate } from '../services/fx.js';
-import { costInUserCurrency, resolveFx } from '../services/portfolio.js';
+import {
+  HISTORY_RANGES,
+  portfolioHistory,
+  savePortfolioSnapshot,
+} from '../services/portfolioHistory.js';
+import {
+  gainSplit,
+  holdingPosition,
+  resolveFx,
+  withHistoricalAmounts,
+} from '../services/portfolio.js';
 
 // Experimental investments module. Independent by design: it never touches
 // Transactions, Accounts, Cards or Categories. The net worth (stats) only reads
@@ -55,7 +65,9 @@ const parsePositive = (v) => {
  * - pricePerShare / shares are optional overrides from the user's broker; when
  *   absent the fallback price is used (current quote, or the old price on edit).
  */
-function buildPurchase(body, { fxRate, userCurrency, fallbackPrice }) {
+const MOVEMENT_TYPES = ['buy', 'sell', 'dividend'];
+
+function buildPurchase(body, { fxRate, userCurrency, fallbackPrice, type = 'buy' }) {
   const amount = parsePositive(body.amount);
   let price = parsePositive(body.pricePerShare);
   let shares = parsePositive(body.shares);
@@ -66,19 +78,26 @@ function buildPurchase(body, { fxRate, userCurrency, fallbackPrice }) {
   }
   const amountCurrency = body.amountCurrency === 'quote' ? 'quote' : 'user';
 
+  // A dividend is cash only: no shares, no price.
+  if (type === 'dividend') {
+    if (!amount) throw new InputError('Indica el monto recibido');
+    price = 0;
+    shares = 0;
+  }
+
   let amountQuote;
   if (amount)
     amountQuote = amountCurrency === 'quote' ? amount : amount / fxRate;
   else if (shares && price) amountQuote = shares * price;
   else throw new InputError('Indica el monto invertido');
 
-  if (!price) price = shares ? amountQuote / shares : fallbackPrice;
-  if (!price) {
+  if (type !== 'dividend' && !price) price = shares ? amountQuote / shares : fallbackPrice;
+  if (type !== 'dividend' && !price) {
     throw new InputError(
       'No hay precio disponible para este activo; indica el precio por acción',
     );
   }
-  if (!shares) shares = amountQuote / price;
+  if (type !== 'dividend' && !shares) shares = amountQuote / price;
 
   const amountUser =
     amount && amountCurrency === 'user' ? amount : amountQuote * fxRate;
@@ -90,6 +109,7 @@ function buildPurchase(body, { fxRate, userCurrency, fallbackPrice }) {
   if (date > todayStr()) throw new InputError('La fecha no puede ser futura');
 
   return {
+    type,
     date,
     shares: round(shares, 8),
     pricePerShare: round(price, 6),
@@ -105,6 +125,7 @@ function buildPurchase(body, { fxRate, userCurrency, fallbackPrice }) {
 // to the FX source, everything stays in the asset's currency.
 const formatPurchase = (p) => ({
   id: p.id,
+  type: p.type || 'buy',
   date: p.date,
   shares: Number(p.shares),
   pricePerShare: Number(p.pricePerShare),
@@ -134,6 +155,21 @@ function sendError(res, err) {
 
 async function findOwnedHolding(id, userId) {
   return InvestmentHolding.findOne({ where: { id, UserId: userId } });
+}
+
+/**
+ * Refuses a change that would leave a sale without enough shares at its date
+ * (a sale too big, or editing/deleting an earlier buy). `apply` gets the
+ * holding's current rows as plain objects and returns them after the change.
+ */
+async function assertValidLedger(holdingId, apply) {
+  const rows = await InvestmentPurchase.findAll({
+    where: { InvestmentHoldingId: holdingId },
+  });
+  const after = apply(rows.map((r) => r.get({ plain: true })));
+  if (holdingPosition(after).invalid) {
+    throw new InputError('No tenías tantas acciones para vender en esa fecha');
+  }
 }
 
 async function findOwnedPurchase(purchaseId, userId) {
@@ -202,12 +238,15 @@ router.get('/', async (req, res) => {
     const quote = quotes.get(h.providerSymbol) || null;
     const purchases = h.InvestmentPurchases || [];
 
-    const shares = purchases.reduce((s, p) => s + Number(p.shares), 0);
-    const costQuote = purchases.reduce((s, p) => s + Number(p.amountQuote), 0);
-    const costUser = costInUserCurrency(purchases, fx);
+    const pos = holdingPosition(
+      await withHistoricalAmounts(purchases, h.quoteCurrency, fx.currency),
+      fx,
+    );
+    const { shares, costQuote, costUser } = pos;
     const valueQuote = quote ? shares * quote.price : null;
     const valueUser = valueQuote != null ? valueQuote * fx.fxRate : null;
     const gainUser = valueUser != null ? valueUser - costUser : null;
+    const split = gainSplit({ valueQuote, costQuote, costUser, fxRate: fx.fxRate });
 
     items.push({
       ...formatHoldingBase(h),
@@ -229,6 +268,17 @@ router.get('/', async (req, res) => {
         gainUser != null && costUser > 0
           ? round((gainUser / costUser) * 100, 2)
           : null,
+      // Open gain split: what the price did vs. what the exchange rate did.
+      // The price part is taken from the rounded figures so both always add
+      // up to the gain shown, to the cent.
+      gainPriceUser: split ? round(round(gainUser, 2) - round(split.fx, 2), 2) : null,
+      gainFxUser: split ? round(split.fx, 2) : null,
+      // Already cashed: sales above their average cost, and dividends.
+      realizedUser: round(pos.realizedUser, 2),
+      dividendsUser: round(pos.dividendsUser, 2),
+      // Cost of some old movement converted at today's rate (no history).
+      costFxEstimated: pos.fxEstimated,
+      soldOut: shares === 0 && purchases.some((p) => p.type === 'sell'),
       dayChangeUser:
         quote?.change != null
           ? round(quote.change * shares * fx.fxRate, 2)
@@ -244,12 +294,26 @@ router.get('/', async (req, res) => {
   const totalValue = counted.reduce((s, i) => s + i.valueUser, 0);
   const totalCost = counted.reduce((s, i) => s + i.costUser, 0);
   const dayChange = counted.reduce((s, i) => s + (i.dayChangeUser || 0), 0);
+  const gainFx = counted.reduce((s, i) => s + (i.gainFxUser || 0), 0);
+  const inUserCurrency = items.filter((i) => !i.fxUnavailable);
+  const realized = inUserCurrency.reduce((s, i) => s + i.realizedUser, 0);
+  const dividends = inUserCurrency.reduce((s, i) => s + i.dividendsUser, 0);
   for (const i of items) {
     i.weight =
       counted.includes(i) && totalValue > 0
         ? round((i.valueUser / totalValue) * 100, 2)
         : null;
   }
+  // Today's point of the evolution chart (the cron saves it too). Never
+  // delays or fails the response.
+  if (counted.length) {
+    savePortfolioSnapshot(
+      req.userId,
+      { value: round(totalValue, 2), cost: round(totalCost, 2) },
+      userCurrency,
+    ).catch((err) => console.error('Portfolio snapshot failed:', err.message));
+  }
+
   const quotedTimes = items
     .map((i) => i.quotedAt)
     .filter(Boolean)
@@ -268,6 +332,13 @@ router.get('/', async (req, res) => {
         totalCost > 0
           ? round(((totalValue - totalCost) / totalCost) * 100, 2)
           : null,
+      // gain = gainPrice + gainFx (gainFx is 0 when nothing is converted).
+      gainPrice: round(totalValue - totalCost - gainFx, 2),
+      gainFx: round(gainFx, 2),
+      realized: round(realized, 2),
+      dividends: round(dividends, 2),
+      // What the investments have earned so far: open gain + cashed.
+      totalReturn: round(totalValue - totalCost + realized + dividends, 2),
       dayChange: round(dayChange, 2),
       dayChangePercent:
         totalValue - dayChange > 0
@@ -275,6 +346,17 @@ router.get('/', async (req, res) => {
           : null,
     },
     holdings: items,
+  });
+});
+
+// GET /api/investments/history?range=1m|3m|6m|1y|all — daily value and cost
+router.get('/history', async (req, res) => {
+  const range = Object.hasOwn(HISTORY_RANGES, req.query.range) ? req.query.range : '3m';
+  const currency = await getUserCurrency(req.userId);
+  res.json({
+    currency,
+    range,
+    points: await portfolioHistory(req.userId, currency, range),
   });
 });
 
@@ -364,13 +446,18 @@ router.post('/:id/purchases', async (req, res) => {
     resolveFx(holding.quoteCurrency, userCurrency),
     getQuote(holding.providerSymbol, holding.quoteCurrency),
   ]);
+  const type = MOVEMENT_TYPES.includes(req.body.type) ? req.body.type : 'buy';
   let values;
   try {
     values = buildPurchase(req.body, {
       fxRate: fx.fxRate,
       userCurrency: fx.currency,
       fallbackPrice: quote?.price,
+      type,
     });
+    if (type === 'sell') {
+      await assertValidLedger(holding.id, (rows) => [...rows, values]);
+    }
   } catch (err) {
     return sendError(res, err);
   }
@@ -398,11 +485,16 @@ router.put('/purchases/:purchaseId', async (req, res) => {
   }
   let values;
   try {
+    // The kind of movement can't change; delete it and add the right one.
     values = buildPurchase(body, {
       fxRate: Number(purchase.fxRate),
       userCurrency: purchase.userCurrency,
       fallbackPrice: Number(purchase.pricePerShare),
+      type: purchase.type || 'buy',
     });
+    await assertValidLedger(purchase.InvestmentHoldingId, (rows) =>
+      rows.map((r) => (r.id === purchase.id ? { ...r, ...values } : r)),
+    );
   } catch (err) {
     return sendError(res, err);
   }
@@ -415,6 +507,13 @@ router.delete('/purchases/:purchaseId', async (req, res) => {
   const purchase = await findOwnedPurchase(req.params.purchaseId, req.userId);
   if (!purchase)
     return res.status(404).json({ message: 'Compra no encontrada' });
+  try {
+    await assertValidLedger(purchase.InvestmentHoldingId, (rows) =>
+      rows.filter((r) => r.id !== purchase.id),
+    );
+  } catch (err) {
+    return sendError(res, err);
+  }
   await purchase.destroy();
   res.status(204).send();
 });
